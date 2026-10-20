@@ -1,0 +1,22 @@
+# Never commit game content or archives to this repo.
+# GitHub hard-rejects files over 100 MB, and the game is several GB.
+*.rar
+*.r[0-9][0-9]
+*.part*.rar
+*.zip
+*.7z
+*.pak
+*.exe
+*.dll
+*.bin
+*.uasset
+*.umap
+
+# build / runtime noise
+*.log
+.extract/
+prefix/
+game/
+
+# the manifest IS wanted - it's small text - so it is deliberately not ignored
+# (tools/make-manifest.sh writes ./manifest.txt)

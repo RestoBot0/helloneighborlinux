@@ -1,0 +1,31 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Hello Neighbor
+GenericName=Stealth Horror Game
+Comment=Sneak into your neighbour's house and find out what he's hiding
+Exec=@BIN_DIR@/hello-neighbor-launch
+Icon=hello-neighbor
+Terminal=false
+Categories=Game;ActionGame;AdventureGame;
+Keywords=hello;neighbor;neighbour;horror;stealth;tinybuild;
+StartupNotify=true
+StartupWMClass=helloneighbor-win64-shipping.exe
+PrefersNonDefaultGPU=true
+Actions=Windowed;SafeMode;Kill;Logs;
+
+[Desktop Action Windowed]
+Name=Play in a window
+Exec=@BIN_DIR@/hello-neighbor-launch --windowed
+
+[Desktop Action SafeMode]
+Name=Safe mode (OpenGL / DX10)
+Exec=@BIN_DIR@/hello-neighbor-launch --safe --windowed
+
+[Desktop Action Kill]
+Name=Force quit the game
+Exec=@BIN_DIR@/hello-neighbor-launch --kill
+
+[Desktop Action Logs]
+Name=Open the log folder
+Exec=xdg-open @APP_HOME@/logs
