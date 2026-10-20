@@ -31,7 +31,7 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 ICON_BASE="$HOME/.local/share/icons/hicolor"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-RAR_PATH=""
+ARCHIVE_PATH=""
 EXTRACTED_DIR=""
 RES="1280x720"
 USE_WINEHQ=0
@@ -53,7 +53,7 @@ trap 'err "Failed on line $LINENO. Nothing is half-installed that ./uninstall.sh
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --rar)          shift; RAR_PATH="${1:-}" ;;
+    --rar|--zip|--archive) shift; ARCHIVE_PATH="${1:-}" ;;
     --game-dir)     shift; EXTRACTED_DIR="${1:-}" ;;
     --res)          shift; RES="${1:-1280x720}" ;;
     --winehq)       USE_WINEHQ=1 ;;
@@ -151,40 +151,62 @@ if [ -n "$EXTRACTED_DIR" ]; then
   SOURCE_DIR="$(cd "$EXTRACTED_DIR" && pwd)"
   ok "using existing folder: $SOURCE_DIR"
 else
-  if [ -z "$RAR_PATH" ]; then
-    # be helpful: look in the obvious places
-    for guess in "$HOME/Downloads" "$HOME" "/mnt/chromeos/MyFiles/Downloads" "/mnt/chromeos/MyFiles"; do
+  if [ -z "$ARCHIVE_PATH" ]; then
+    # be helpful: look in the obvious places. "Linux files" in the ChromeOS
+    # Files app IS the container's $HOME, so that is the first place to look.
+    for guess in "$HOME" "$HOME/Downloads" "/mnt/chromeos/MyFiles/Downloads" "/mnt/chromeos/MyFiles"; do
       [ -d "$guess" ] || continue
-      found="$(find "$guess" -maxdepth 2 -iname '*.rar' -size +100M 2>/dev/null | head -1)"
-      [ -n "$found" ] && { RAR_PATH="$found"; break; }
+      found="$(find "$guess" -maxdepth 2 \
+                 \( -iname '*.rar' -o -iname '*.zip' -o -iname '*.7z' \) \
+                 -size +100M 2>/dev/null | head -1)"
+      [ -n "$found" ] && { ARCHIVE_PATH="$found"; break; }
     done
-    [ -n "$RAR_PATH" ] && ok "auto-detected archive: $RAR_PATH"
+    [ -n "$ARCHIVE_PATH" ] && ok "auto-detected archive: $ARCHIVE_PATH"
   fi
-  [ -n "$RAR_PATH" ] || die "No .rar found. Pass one with --rar /path/to/HelloNeighbor.rar"
-  [ -f "$RAR_PATH" ] || die "Not a file: $RAR_PATH"
-  RAR_PATH="$(cd "$(dirname "$RAR_PATH")" && pwd)/$(basename "$RAR_PATH")"
-  ok "archive: $RAR_PATH ($(du -h "$RAR_PATH" | cut -f1))"
+  [ -n "$ARCHIVE_PATH" ] || die "No archive found. Pass one with --archive /path/to/HelloNeighbor.zip"
+  [ -f "$ARCHIVE_PATH" ] || die "Not a file: $ARCHIVE_PATH"
+  ARCHIVE_PATH="$(cd "$(dirname "$ARCHIVE_PATH")" && pwd)/$(basename "$ARCHIVE_PATH")"
+  ok "archive: $ARCHIVE_PATH ($(du -h "$ARCHIVE_PATH" | cut -f1))"
 
-  # --- pick an extractor that actually understands RAR5 --------------------
-  # Debian's unrar-free CANNOT read RAR5 and fails with a confusing error,
-  # so it is deliberately last in this list.
+  # --- pick an extractor that understands this format ----------------------
+  # Note: Debian's unrar-free CANNOT read RAR5 and fails with a confusing
+  # error, so it is deliberately last. For .zip we prefer unzip, but fall
+  # back to 7z/unar because some large game zips use ZIP64 or deflate64,
+  # which older unzip builds choke on.
+  shopt -s nocasematch
+  case "$ARCHIVE_PATH" in
+    *.zip) FMT="zip" ;;
+    *.7z)  FMT="7z"  ;;
+    *)     FMT="rar" ;;
+  esac
+  shopt -u nocasematch
+
   EXTRACT_CMD=""
-  if have unar;        then EXTRACT_CMD="unar";
-  elif have 7zz;       then EXTRACT_CMD="7zz";
-  elif have 7z;        then EXTRACT_CMD="7z";
-  elif have unrar;     then EXTRACT_CMD="unrar";
-  elif have unrar-free;then EXTRACT_CMD="unrar-free";
-  else die "No RAR extractor. Install one with: sudo apt install unar"; fi
-  ok "extractor: $EXTRACT_CMD"
+  if [ "$FMT" = "zip" ]; then
+    if   have unzip; then EXTRACT_CMD="unzip"
+    elif have 7zz;   then EXTRACT_CMD="7zz"
+    elif have 7z;    then EXTRACT_CMD="7z"
+    elif have unar;  then EXTRACT_CMD="unar"
+    else die "No zip extractor. Install one with: sudo apt install unzip"; fi
+  else
+    if   have unar;       then EXTRACT_CMD="unar"
+    elif have 7zz;        then EXTRACT_CMD="7zz"
+    elif have 7z;         then EXTRACT_CMD="7z"
+    elif have unrar;      then EXTRACT_CMD="unrar"
+    elif have unrar-free; then EXTRACT_CMD="unrar-free"
+    else die "No RAR extractor. Install one with: sudo apt install unar"; fi
+  fi
+  ok "format: $FMT   extractor: $EXTRACT_CMD"
 
   STAGE="$APP_HOME/.extract"
   rm -rf "$STAGE"; mkdir -p "$STAGE"
   echo "    extracting (several minutes for a few GB -- grab a drink)..."
   case "$EXTRACT_CMD" in
-    unar)       unar -quiet -force-overwrite -output-directory "$STAGE" "$RAR_PATH" ;;
-    7zz|7z)     "$EXTRACT_CMD" x -y -bso0 -bsp1 -o"$STAGE" "$RAR_PATH" ;;
-    unrar)      unrar x -y -idq "$RAR_PATH" "$STAGE/" ;;
-    unrar-free) unrar-free -x "$RAR_PATH" "$STAGE/" ;;
+    unzip)      unzip -q -o "$ARCHIVE_PATH" -d "$STAGE" ;;
+    unar)       unar -quiet -force-overwrite -output-directory "$STAGE" "$ARCHIVE_PATH" ;;
+    7zz|7z)     "$EXTRACT_CMD" x -y -bso0 -bsp1 -o"$STAGE" "$ARCHIVE_PATH" ;;
+    unrar)      unrar x -y -idq "$ARCHIVE_PATH" "$STAGE/" ;;
+    unrar-free) unrar-free -x "$ARCHIVE_PATH" "$STAGE/" ;;
   esac
   ok "extraction finished"
   SOURCE_DIR="$STAGE"
@@ -420,10 +442,10 @@ export HN_GAME_EXE="$FINAL_EXE"
 sed -i "s|^#\?HN_GAME_EXE=.*|HN_GAME_EXE=\"$FINAL_EXE\"|" "$APP_HOME/launcher.conf" 2>/dev/null || \
   echo "HN_GAME_EXE=\"$FINAL_EXE\"" >> "$APP_HOME/launcher.conf"
 
-if [ -z "$EXTRACTED_DIR" ] && [ "$KEEP_ARCHIVE" = "0" ] && [ -n "$RAR_PATH" ]; then
+if [ -z "$EXTRACTED_DIR" ] && [ "$KEEP_ARCHIVE" = "0" ] && [ -n "$ARCHIVE_PATH" ]; then
   echo
-  read -r -p "    Delete the original archive to reclaim $(du -h "$RAR_PATH" | cut -f1)? [y/N] " yn
-  case "$yn" in [Yy]*) rm -f "$RAR_PATH"; ok "archive deleted" ;; *) ok "archive kept" ;; esac
+  read -r -p "    Delete the original archive to reclaim $(du -h "$ARCHIVE_PATH" | cut -f1)? [y/N] " yn
+  case "$yn" in [Yy]*) rm -f "$ARCHIVE_PATH"; ok "archive deleted" ;; *) ok "archive kept" ;; esac
 fi
 
 cat <<DONE
