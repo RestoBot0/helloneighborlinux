@@ -65,7 +65,19 @@ ENABLE_CONSOLE=1
 USE_SM4=0          # UE4 shipping builds rarely cook SM4 shaders
 EXTRA_GAME_ARGS=""
 # shellcheck disable=SC1090
+# launcher.conf is sourced after the defaults above so it can override them.
+# But sourcing would also clobber anything the user passed on the command
+# line as an environment variable -- and "HN_VK_WSI_SW=1 hello-neighbor-launch"
+# is exactly what we tell people to try. Remember the environment first and
+# put it back afterwards, so precedence is: env > launcher.conf > defaults.
+_env_wsi="${HN_VK_WSI_SW-}"
+_env_vdesk="${HN_VIRTUAL_DESKTOP-}"
+_env_wine="${HN_WINE-}"
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
+[ -n "$_env_wsi" ]   && HN_VK_WSI_SW="$_env_wsi"
+[ -n "$_env_vdesk" ] && VDESK="$_env_vdesk"
+[ -n "$_env_wine" ]  && HN_WINE="$_env_wine"
+unset _env_wsi _env_vdesk _env_wine
 # conf may override where the game lives, so re-resolve after sourcing it
 [ -n "${HN_GAME_DIR:-}" ] && GAME_DIR="$HN_GAME_DIR"
 
@@ -340,6 +352,14 @@ if grep -q "CreateSwapChain" "$LOG_FILE" 2>/dev/null; then
     log "    1. $0 --vdesk            (run inside a Wine virtual desktop)"
     log "    2. $0 --vdesk --windowed"
     log "    3. set HN_VK_WSI_SW=1 in $APP_HOME/launcher.conf"
+fi
+if grep -qE "887A0020|D3D11Viewport.cpp" "$LOG_FILE" 2>/dev/null; then
+    log "DIAGNOSIS: the game rendered, then failed to put the frame on screen."
+    log "  887A0020 is DXGI_ERROR_DRIVER_INTERNAL_ERROR, raised from Present()."
+    log "  This is the known Venus presentation bug in Crostini."
+    log "  Fix: set HN_VK_WSI_SW=1 in $APP_HOME/launcher.conf"
+    log "  Test it right now with:"
+    log "    HN_VK_WSI_SW=1 $0"
 fi
 if grep -q "loader_thunks.c" "$LOG_FILE" 2>/dev/null; then
     log "DIAGNOSIS: Wine is too old for the Vulkan driver installed."

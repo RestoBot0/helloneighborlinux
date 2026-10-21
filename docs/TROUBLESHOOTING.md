@@ -406,3 +406,60 @@ Vulkan at all in Crostini, and without Vulkan the only path is WineD3D,
 which cannot render this game (see the `GL_RGBA8_SNORM` section above).
 Old Mesa and new DXVK are both dead ends; new Mesa with a matched
 DXVK/Wine pair is the one combination that works.
+
+---
+
+## Crash after a few seconds: `D3D11Viewport.cpp:304 ... error 887A0020`
+
+**Symptom.** The game starts, the rendering thread runs for a while, then:
+
+```
+LowLevelFatalError [Line: 826]
+Rendering thread exception:
+LowLevelFatalError [Line: 251]
+Result failed
+ at ...\D3D11RHI\Private\D3D11Viewport.cpp:304
+ with error 887A0020
+```
+
+**This is good news in disguise.** Everything up to and including rendering
+worked. `887A0020` is `DXGI_ERROR_DRIVER_INTERNAL_ERROR`, and
+`D3D11Viewport.cpp:304` is UE4 checking the result of **`Present()`** — the
+call that hands a finished frame to the screen. The game drew the frame and
+then failed to display it.
+
+**Cause.** Venus's presentation path through ChromeOS's X server
+(`sommelier`, an XWayland) is buggy. The GPU work completes; the handoff to
+the window system fails and DXVK reports a driver-internal error upward.
+
+**Fix.** Edit `~/.local/share/hello-neighbor/launcher.conf` and set:
+
+```ini
+HN_VK_WSI_SW=1
+```
+
+Or test it without editing anything:
+
+```bash
+HN_VK_WSI_SW=1 ~/.local/share/hello-neighbor/bin/hello-neighbor-launch
+```
+
+That sets `MESA_VK_WSI_DEBUG=sw`, which moves **only** the final
+frame-to-window copy onto the CPU. All actual rendering stays on the GPU, so
+the cost is a few percent — it is not a fall back to software rendering.
+
+If that is not enough, also try a Wine virtual desktop, which gives Wine a
+single top-level X window it owns outright:
+
+```ini
+VDESK=1
+```
+
+> Settings precedence is **environment variable > launcher.conf > built-in
+> default**, so a one-off `HN_VK_WSI_SW=1 ...` on the command line always
+> wins over the config file.
+
+The installer also now writes `dxgi.syncInterval = 0` into `dxvk.conf`.
+Venus's queued (vsync/FIFO) present path is the one that misbehaves, and
+ChromeOS composites and paces frames itself, so there is nothing to gain by
+waiting on it inside the game.

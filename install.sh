@@ -425,6 +425,11 @@ dxgi.deferSurfaceCreation = True
 # Never let the game ask for a real display mode change: meaningless in a
 # Crostini window and another source of swap-chain failures.
 dxgi.maxFrameLatency = 1
+
+# Venus's queued (FIFO/vsync) present path is the one that misbehaves under
+# ChromeOS's compositor. ChromeOS does its own compositing and pacing
+# anyway, so there is nothing to gain by waiting on it here.
+dxgi.syncInterval = 0
 DXVKCONF
 ok "dxvk.conf written"
 
@@ -472,6 +477,18 @@ FORCE_BACKEND=""     # "" (auto) | dxvk | wined3d
 WINDOWED=0
 ENABLE_CONSOLE=1
 EXTRA_GAME_ARGS=""
+
+# --- if the game crashes while showing a frame --------------------------
+# Venus (Crostini's Vulkan driver) has a known bug presenting frames through
+# ChromeOS's X server. The symptom is UE4 dying in D3D11Viewport.cpp with
+# error 887A0020 (DXGI_ERROR_DRIVER_INTERNAL_ERROR) after a few seconds.
+# 1 moves only the final "copy the frame into the window" step to the CPU.
+# All rendering stays on the GPU, so the cost is small.
+HN_VK_WSI_SW=0
+
+# Run inside a single Wine-owned window. Helps when ChromeOS's window
+# handling confuses the game.
+VDESK=0
 CONF
 ok "launcher.conf written (tweak resolution here later)"
 
