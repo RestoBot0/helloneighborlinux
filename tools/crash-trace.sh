@@ -164,7 +164,9 @@ rc="$(grep -ao 'game exited rc=[0-9]*' "$OUT" 2>/dev/null | tail -1 | cut -d= -f
 case "${rc:-}" in
   "")  printf 'no exit code recorded\n' ;;
   0)   printf '%src=0 -- clean exit%s\n' "$G" "$N" ;;
-  3)   printf '%src=3 -- winevulkan assertion (the old crash)%s\n' "$R" "$N" ;;
+  3)   printf '%src=3 -- Unreal fatal error (LowLevelFatalError)%s\n' "$R" "$N"
+       printf '     Unreal calls exit(3) on a critical error, so this is the engine\n'
+       printf '     giving up cleanly. Read its report: ./tools/read-crash.sh\n' ;;
   5)   printf '%src=5 -- 0xC0000005 ACCESS VIOLATION (crash inside the game)%s\n' "$R" "$N" ;;
   11)  printf '%src=11 -- 0xC000000B / segmentation fault%s\n' "$R" "$N" ;;
   53)  printf '%src=53 -- 0xC0000135 a DLL was not found%s\n' "$R" "$N" ;;

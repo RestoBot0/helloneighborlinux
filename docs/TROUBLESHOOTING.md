@@ -555,14 +555,32 @@ status gets truncated. The low byte is what reaches the log:
 | `rc=` | Windows status | Meaning |
 |---|---|---|
 | 0 | - | clean exit |
-| 3 | - | our `winevulkan` assertion (`loader_thunks.c`) |
+| 3 | - | Unreal fatal error: it calls `exit(3)` when `GIsCriticalError` |
 | 5 | `0xC0000005` | access violation -- a crash *inside the game's own code* |
 | 11 | `0xC000000B` | segmentation fault |
 | 53 | `0xC0000135` | a DLL was not found |
 
-`rc=5` is the important one to recognise: it is not a graphics-stack failure,
-it is the game dereferencing a bad pointer. Chasing Vulkan settings will not
-help once you are seeing `rc=5`.
+`rc=3` and `rc=5` mean genuinely different things, and the difference is the
+most useful signal in this whole project:
+
+* **`rc=3`** -- Unreal caught the problem itself, wrote a crash report and
+  exited deliberately. Read the report; it names the failing call.
+* **`rc=5`** -- nobody caught it. Unreal's own exception handler never ran,
+  so no report exists, and Wine prints `Exception frame is not in stack
+  limits => unable to dispatch exception`. The fault is below Wine, in
+  Linux-side code -- in practice the Vulkan driver.
+
+Measured on the reference Chromebook, the two are selected by one setting:
+
+| `MESA_VK_WSI_DEBUG=sw` | result |
+|---|---|
+| on | `rc=5`, no report, fault inside Linux graphics code |
+| off | `rc=3`, report written, `CreateSwapChain ... E_FAIL` |
+
+With software presentation off, Venus cannot produce a usable window
+surface at all, so DXGI never gets a swap chain. With it on, the surface
+works and the crash moves later and deeper. It therefore has to stay on, and
+the remaining problem is the one behind it.
 
 ### Getting a backtrace
 

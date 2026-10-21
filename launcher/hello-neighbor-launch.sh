@@ -18,6 +18,7 @@
 #   --console      start with the UE4 developer console enabled
 #   --vdesk        run inside a Wine virtual desktop (fixes CreateSwapChain)
 #   --kill         terminate a running game + its wine prefix
+#   --no-windowed  let the game pick its own window mode (default: windowed)
 #   --debug        verbose wine logging (slow, for troubleshooting only)
 # ---------------------------------------------------------------------------
 set -uo pipefail
@@ -63,7 +64,9 @@ VDESK="${HN_VIRTUAL_DESKTOP:-0}"
 # Ask Unreal to write its own log. Cheap, and it names failures that Wine's
 # output cannot (missing assets, out-of-memory, shader problems).
 GAME_LOG="${HN_GAME_LOG:-1}"
-WINDOWED=0
+# Windowed by default: this build asks for exclusive fullscreen, which has
+# no meaning in Crostini and which DXGI refuses. HN_WINDOWED overrides it.
+WINDOWED="${HN_WINDOWED:-1}"
 ENABLE_CONSOLE=1
 USE_SM4=0          # UE4 shipping builds rarely cook SM4 shaders
 EXTRA_GAME_ARGS=""
@@ -76,11 +79,13 @@ EXTRA_GAME_ARGS=""
 _env_wsi="${HN_VK_WSI_SW-}"
 _env_vdesk="${HN_VIRTUAL_DESKTOP-}"
 _env_wine="${HN_WINE-}"
+_env_windowed="${HN_WINDOWED-}"
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 [ -n "$_env_wsi" ]   && HN_VK_WSI_SW="$_env_wsi"
 [ -n "$_env_vdesk" ] && VDESK="$_env_vdesk"
 [ -n "$_env_wine" ]  && HN_WINE="$_env_wine"
-unset _env_wsi _env_vdesk _env_wine
+[ -n "$_env_windowed" ] && WINDOWED="$_env_windowed"
+unset _env_wsi _env_vdesk _env_wine _env_windowed
 # conf may override where the game lives, so re-resolve after sourcing it
 [ -n "${HN_GAME_DIR:-}" ] && GAME_DIR="$HN_GAME_DIR"
 
@@ -91,6 +96,7 @@ DEBUG=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --windowed) WINDOWED=1 ;;
+        --no-windowed) WINDOWED=0 ;;
         --safe)     FORCE_BACKEND="wined3d"; SAFE_MODE=1; WINDOWED=1; RES_W=1024; RES_H=576 ;;
         --sm4)      USE_SM4=1 ;;
         --gl)       FORCE_BACKEND="wined3d" ;;
