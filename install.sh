@@ -38,6 +38,7 @@ USE_WINEHQ=0
 WINE_UPGRADED=0
 DO_DEPS=1
 DO_DXVK=1
+DXVK_USER_OFF=0    # only an explicit --no-dxvk may uninstall a working DXVK
 KEEP_ARCHIVE=0
 LOWMEM=1           # 0 disables; trims memory use for 8 GB shared-RAM machines
 SAFE_ICON=0        # --safe-icon adds a second, troubleshooting-only launcher entry
@@ -68,7 +69,7 @@ while [ $# -gt 0 ]; do
     --res)          shift; RES="${1:-1280x720}" ;;
     --winehq)       USE_WINEHQ=1 ;;
     --no-deps)      DO_DEPS=0 ;;
-    --no-dxvk)      DO_DXVK=0 ;;
+    --no-dxvk)      DO_DXVK=0; DXVK_USER_OFF=1 ;;
     --keep-archive) KEEP_ARCHIVE=1 ;;
     --copy)         COPY_GAME=1 ;;
     --in-place)     COPY_GAME=0 ;;
@@ -208,7 +209,7 @@ else
                  -size +100M 2>/dev/null | head -1)"
       [ -n "$found" ] && { ARCHIVE_PATH="$found"; break; }
     done
-    [ -n "$ARCHIVE_PATH" ] && ok "auto-detected archive: $ARCHIVE_PATH"
+    if [ -n "$ARCHIVE_PATH" ]; then ok "auto-detected archive: $ARCHIVE_PATH"; fi
   fi
   [ -n "$ARCHIVE_PATH" ] || die "No archive found. Pass one with --archive /path/to/HelloNeighbor.zip"
   [ -f "$ARCHIVE_PATH" ] || die "Not a file: $ARCHIVE_PATH"
@@ -366,6 +367,11 @@ else
   DO_DXVK=0
 fi
 
+# Vulkan detection runs vulkaninfo, which can fail for reasons that have
+# nothing to do with whether DXVK works -- a slow container start, a missing
+# render group after a reboot. That must never be grounds for deleting a
+# DXVK that is installed and working.
+
 # --- match DXVK to the Wine we have ----------------------------------------
 # DXVK 2.x drives modern Vulkan entry points. Wine's winevulkan is a
 # generated thunk layer: call something the installed Wine was not built to
@@ -388,19 +394,52 @@ if [ "$DO_DXVK" = "1" ]; then
   fi
 fi
 
+# Set when DXVK is unavailable for a reason that is nobody's decision -- a
+# failed download, a corrupt archive, vulkaninfo not answering. An existing,
+# working DXVK is then left exactly where it is. The ONLY thing that may
+# uninstall it is the user explicitly asking, with --no-dxvk.
+DXVK_KEEP_EXISTING=0
+if [ "$DO_DXVK" = "0" ] && [ "$DXVK_USER_OFF" = "0" ]; then DXVK_KEEP_EXISTING=1; fi
+
 if [ "$DO_DXVK" = "1" ]; then
   TMPD="$(mktemp -d)"
-  if curl -fsSL -o "$TMPD/dxvk.tar.gz" \
-      "https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VER}/dxvk-${DXVK_VER}.tar.gz" 2>/dev/null; then
-    tar -xzf "$TMPD/dxvk.tar.gz" -C "$TMPD"
+  # Keep the tarball. It is 8 MB, it never changes for a given version, and
+  # re-downloading it on every reinstall is what broke a working install the
+  # one time GitHub was slow.
+  mkdir -p "$APP_HOME/cache"
+  DXVK_CACHE="$APP_HOME/cache/dxvk-${DXVK_VER}.tar.gz"
+  DXVK_SRC=""
+  if [ -f "$DXVK_CACHE" ] && tar -tzf "$DXVK_CACHE" >/dev/null 2>&1; then
+    DXVK_SRC="$DXVK_CACHE"
+    ok "reusing the cached DXVK $DXVK_VER download"
+  else
+    printf '    %s*%s downloading DXVK %s' "$G" "$N" "$DXVK_VER"
+    if curl -fL --retry 4 --retry-delay 3 --connect-timeout 20 \
+         -o "$TMPD/dxvk.tar.gz" \
+         "https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VER}/dxvk-${DXVK_VER}.tar.gz" \
+         >"$TMPD/curl.err" 2>&1 \
+       && tar -tzf "$TMPD/dxvk.tar.gz" >/dev/null 2>&1; then
+      printf ' ok\n'
+      cp -f "$TMPD/dxvk.tar.gz" "$DXVK_CACHE" 2>/dev/null || true
+      DXVK_SRC="$TMPD/dxvk.tar.gz"
+    else
+      printf ' failed\n'
+      # NOT "[ -s f ] && warn ..." -- as the last command of this branch a
+      # false test becomes the if-statement's exit status, and set -e kills
+      # the installer right here.
+      if [ -s "$TMPD/curl.err" ]; then warn "curl: $(tail -1 "$TMPD/curl.err")"; fi
+    fi
+  fi
+  if [ -n "$DXVK_SRC" ]; then
+    tar -xzf "$DXVK_SRC" -C "$TMPD"
     SYS32="$WINEPREFIX/drive_c/windows/system32"
     if [ ! -d "$SYS32" ]; then
       warn "Wine prefix looks incomplete ($SYS32 missing) -- skipping DXVK"
-      DO_DXVK=0
+      DO_DXVK=0; DXVK_KEEP_EXISTING=1
     fi
   else
-    warn "could not download DXVK $DXVK_VER -- staying on WineD3D"
-    DO_DXVK=0
+    warn "could not fetch DXVK $DXVK_VER"
+    DO_DXVK=0; DXVK_KEEP_EXISTING=1
   fi
   if [ "$DO_DXVK" = "1" ]; then
     # DXVK 2.x no longer ships d3d10core.dll. Only override a DLL we actually
@@ -423,17 +462,37 @@ if [ "$DO_DXVK" = "1" ]; then
       ok "overrode: $COPIED"
     else
       warn "DXVK archive had no x64 DLLs -- staying on WineD3D"
-      DO_DXVK=0
+      DO_DXVK=0; DXVK_KEEP_EXISTING=1
     fi
   fi
   if [ "$DO_DXVK" = "1" ] && [ ! -f "$WINEPREFIX/.dxvk-installed" ]; then
     warn "DXVK could not be set up -- falling back to WineD3D"
-    DO_DXVK=0
+    DO_DXVK=0; DXVK_KEEP_EXISTING=1
   fi
   rm -rf "$TMPD"
 fi
 
-if [ "$DO_DXVK" = "0" ] && [ -f "$WINEPREFIX/.dxvk-installed" ]; then
+if [ "$DO_DXVK" = "0" ] && [ "${DXVK_KEEP_EXISTING:-0}" = "1" ] \
+   && [ -f "$WINEPREFIX/.dxvk-installed" ]; then
+  # DXVK is already installed and working; this run simply could not fetch or
+  # verify a fresh copy. Deleting it would swap a working game for WineD3D,
+  # which cannot render this build at all. Leave it completely alone.
+  ok "kept the DXVK that is already installed -- nothing was changed"
+  warn "re-run later to refresh it; once a download succeeds it is cached"
+  DO_DXVK=1
+fi
+
+# Ending up on WineD3D with no DXVK at all is not a warning, it is a broken
+# install: this build cannot render on WineD3D. Say so plainly.
+if [ "$DO_DXVK" = "0" ] && [ "$DXVK_USER_OFF" = "0" ] \
+   && [ ! -f "$WINEPREFIX/.dxvk-installed" ]; then
+  warn "DXVK is NOT installed, so the game will not start."
+  warn "Nothing else is wrong -- just run the same install command again."
+  warn "The download is the only part that failed, and it is retried 4 times."
+fi
+
+if [ "$DO_DXVK" = "0" ] && [ "$DXVK_USER_OFF" = "1" ] \
+   && [ -f "$WINEPREFIX/.dxvk-installed" ]; then
   # A previous run installed DXVK. Undo it properly, otherwise the launcher
   # keeps selecting the DXVK backend and loads half-removed DLLs.
   SYS32="$WINEPREFIX/drive_c/windows/system32"
@@ -646,16 +705,18 @@ unset _master _sum
 
 # Was there already a launcher entry? If so this is a reinstall, and ChromeOS
 # is holding an icon it will not willingly give up (see the refresh below).
-HAD_DESKTOP=0
-if [ -f "$DESKTOP_DIR/$APP_ID.desktop" ]; then HAD_DESKTOP=1; fi
-
-# If a previous run was interrupted mid-refresh, the launcher entry is still
-# sitting in the stash. Put it back before we do anything else.
+# If a previous run was interrupted mid-refresh (Ctrl+C during the 25s wait),
+# the launcher entry is sitting in the stash, not in the applications folder.
+# Restore it FIRST -- checking HAD_DESKTOP before this would read 0 and skip
+# the refresh on the very run that most needs it.
 ICON_STASH="$APP_HOME/.icon-refresh"
 if [ -d "$ICON_STASH" ]; then
   mv -f "$ICON_STASH"/*.desktop "$DESKTOP_DIR"/ 2>/dev/null || true
   rmdir "$ICON_STASH" 2>/dev/null || true
 fi
+
+HAD_DESKTOP=0
+if [ -f "$DESKTOP_DIR/$APP_ID.desktop" ]; then HAD_DESKTOP=1; fi
 
 # --- .desktop --------------------------------------------------------------
 cat > "$DESKTOP_DIR/$APP_ID.desktop" <<DESKTOP
