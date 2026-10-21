@@ -80,12 +80,14 @@ _env_wsi="${HN_VK_WSI_SW-}"
 _env_vdesk="${HN_VIRTUAL_DESKTOP-}"
 _env_wine="${HN_WINE-}"
 _env_windowed="${HN_WINDOWED-}"
+_env_sync="${HN_WINESYNC-}"
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 [ -n "$_env_wsi" ]   && HN_VK_WSI_SW="$_env_wsi"
 [ -n "$_env_vdesk" ] && VDESK="$_env_vdesk"
 [ -n "$_env_wine" ]  && HN_WINE="$_env_wine"
 [ -n "$_env_windowed" ] && WINDOWED="$_env_windowed"
-unset _env_wsi _env_vdesk _env_wine _env_windowed
+[ -n "$_env_sync" ] && HN_WINESYNC="$_env_sync"
+unset _env_wsi _env_vdesk _env_wine _env_windowed _env_sync
 # conf may override where the game lives, so re-resolve after sourcing it
 [ -n "${HN_GAME_DIR:-}" ] && GAME_DIR="$HN_GAME_DIR"
 
@@ -264,8 +266,38 @@ else
 fi
 
 # faster synchronisation primitives; harmless if the wine build lacks them
-export WINEESYNC=1
-export WINEFSYNC=1
+# esync and fsync replace Wine's server-side synchronisation with eventfd
+# and futex primitives. They are a large win on a normal desktop and they
+# have been forced on here since the first version of this launcher, never
+# once tested off.
+#
+# Two reasons to be able to turn them off. First, esync needs a high
+# open-file limit because every Windows sync object becomes a file
+# descriptor; a UE4 game makes thousands, and on a container with the usual
+# 1024 limit esync fails in ways that surface as corrupted threads rather
+# than as a clean error. Second, fsync depends on kernel futex features that
+# a Crostini VM kernel may not provide.
+#
+# Raise the limit as far as we are allowed before giving up on them, and
+# record what we ended up with, because "invalid frame / Exception frame is
+# not in stack limits" on a worker thread is exactly the shape this failure
+# takes.
+if [ "${HN_WINESYNC:-1}" = "1" ]; then
+    _hard="$(ulimit -Hn 2>/dev/null || echo 1024)"
+    [ "$_hard" = "unlimited" ] && _hard=1048576
+    ulimit -n "$_hard" 2>/dev/null || true
+    export WINEESYNC=1
+    export WINEFSYNC=1
+else
+    export WINEESYNC=0
+    export WINEFSYNC=0
+    unset WINEESYNC WINEFSYNC
+fi
+if [ "${HN_WINESYNC:-1}" = "1" ]; then
+    log "esync/fsync on; open-file limit $(ulimit -n)"
+else
+    log "esync/fsync OFF (HN_WINESYNC=0); open-file limit $(ulimit -n)"
+fi
 
 # --- Crostini audio ---------------------------------------------------------
 # The default 20ms Pulse latency crackles badly through the ChromeOS audio
@@ -485,6 +517,19 @@ if grep -q 'S_API FAIL' "$LOG_FILE" 2>/dev/null; then
     log "  Engine.ini lives under the prefix at:"
     log "    .../drive_c/users/*/AppData/Local/HelloNeighbor/Saved/Config/WindowsNoEditor/"
     log "  Reinstall to restore it, or see docs/TROUBLESHOOTING.md."
+fi
+
+# A worker thread whose exception registration record points outside its own
+# stack. Wine cannot dispatch the exception and the process dies without
+# Unreal's handler ever running, so no crash report is written. This is the
+# signature of synchronisation-level corruption rather than a graphics bug.
+if grep -q 'not in stack limits\|call_seh_handlers invalid frame' "$LOG_FILE" 2>/dev/null; then
+    log "DIAGNOSIS: a worker thread's exception frame was corrupt."
+    log "  Wine could not dispatch the exception, so Unreal never got to"
+    log "  write a crash report. This is usually synchronisation, not"
+    log "  graphics. Try with Wine's experimental sync primitives off:"
+    log "    HN_WINESYNC=0 $0"
+    log "  open-file limit for this run was $(ulimit -n); esync needs a high one."
 fi
 
 # Unreal writes a crash report of its own even in a Shipping build, under

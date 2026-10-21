@@ -74,16 +74,19 @@ done
 # driver bug: graphics pipeline libraries (new, and Venus support for them
 # is young), parallel pipeline compilation, and the on-disk state cache.
 ATTEMPTS=(
-  "stock Wine 11 behaviour (no Wine 8 workarounds)|0|0|0|0|"
-  "software frame presentation only|0|1|0|0|"
-  "deferred surface creation only|1|0|0|0|"
-  "both Wine 8 workarounds|1|1|0|0|"
-  "software present + single Vulkan driver|0|1|0|1|"
-  "software present + Wine virtual desktop|0|1|1|0|"
-  "no graphics pipeline libraries|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False"
-  "no pipeline libraries, one compiler thread|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;dxvk.numCompilerThreads = 1"
-  "no pipeline libraries, no state cache|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;dxvk.enableStateCache = False"
-  "DirectX feature level 10_1|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;d3d11.maxFeatureLevel = 10_1"
+  "stock Wine 11 behaviour (no Wine 8 workarounds)|0|0|0|0||"
+  "software frame presentation only|0|1|0|0||"
+  "deferred surface creation only|1|0|0|0||"
+  "both Wine 8 workarounds|1|1|0|0||"
+  "software present + single Vulkan driver|0|1|0|1||"
+  "software present + Wine virtual desktop|0|1|1|0||"
+  "no graphics pipeline libraries|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False|"
+  "no pipeline libraries, one compiler thread|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;dxvk.numCompilerThreads = 1|"
+  "no pipeline libraries, no state cache|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;dxvk.enableStateCache = False|"
+  "DirectX feature level 10_1|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;d3d11.maxFeatureLevel = 10_1|"
+  "Wine sync primitives off|0|1|0|0||HN_WINESYNC=0"
+  "Wine sync off + no pipeline libraries|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False|HN_WINESYNC=0"
+  "Wine sync off + virtual desktop|0|1|1|0||HN_WINESYNC=0"
 )
 
 # Known failure signatures, most specific first.
@@ -127,7 +130,7 @@ for row in "${ATTEMPTS[@]}"; do
   i=$((i+1))
   wanted "$i" || continue
 
-  IFS='|' read -r label defer wsi vdesk oneicd extra <<<"$row"
+  IFS='|' read -r label defer wsi vdesk oneicd extra envextra <<<"$row"
   printf '%s[%d/%d] %s%s\n' "$B" "$i" "${#ATTEMPTS[@]}" "$label" "$N"
 
   if [ -f "$CONF.try-backup" ]; then
@@ -148,6 +151,10 @@ for row in "${ATTEMPTS[@]}"; do
   fi
 
   env_args=( "HN_VK_WSI_SW=$wsi" "HN_VIRTUAL_DESKTOP=$vdesk" "HN_GAME_LOG=1" "HN_DXVK_LOG=info" )
+  if [ -n "${envextra:-}" ]; then
+    # shellcheck disable=SC2206
+    env_args+=( ${envextra} )
+  fi
   if [ "$oneicd" = "1" ] && [ -n "$VIRTIO_ICD" ]; then
     env_args+=( "VK_ICD_FILENAMES=$VIRTIO_ICD" "VK_DRIVER_FILES=$VIRTIO_ICD" )
   fi
@@ -169,7 +176,7 @@ for row in "${ATTEMPTS[@]}"; do
   {
     echo "### attempt $i: $label"
     echo "### defer=$defer wsi_sw=$wsi vdesk=$vdesk single_icd=$oneicd  ran ${elapsed}s"
-    echo "### extra: ${extra:-none}"
+    echo "### extra: ${extra:-none}   env: ${envextra:-none}"
     echo
     cat "$LOG_DIR"/launch-*.log 2>/dev/null
   } > "$saved" 2>/dev/null
