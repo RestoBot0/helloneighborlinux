@@ -38,6 +38,7 @@ USE_WINEHQ=0
 DO_DEPS=1
 DO_DXVK=1
 KEEP_ARCHIVE=0
+LOWMEM=1           # 0 disables; trims memory use for 8 GB shared-RAM machines
 SAFE_ICON=0        # --safe-icon adds a second, troubleshooting-only launcher entry
 COPY_GAME=0        # with --game-dir, use the files in place; --copy duplicates
 # DXVK 2.x wants Vulkan 1.3 and a few features Venus can lack; 1.10.3 is the
@@ -69,6 +70,8 @@ while [ $# -gt 0 ]; do
     --copy)         COPY_GAME=1 ;;
     --in-place)     COPY_GAME=0 ;;
     --safe-icon)    SAFE_ICON=1 ;;
+    --lowmem)       LOWMEM=1 ;;
+    --no-lowmem)    LOWMEM=0 ;;
     --dxvk-ver)     shift; DXVK_VER="${1:-2.3.1}"; DXVK_VER_EXPLICIT=1 ;;
     -h|--help)      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option: $1  (try --help)" ;;
@@ -402,11 +405,19 @@ if [ "$DO_DXVK" = "0" ] && [ -f "$WINEPREFIX/.dxvk-installed" ]; then
   ok "removed the previous DXVK install -- back on WineD3D"
 fi
 
-cat > "$APP_HOME/dxvk.conf" <<'DXVKCONF'
+# Decide the low-memory profile here, before anything that depends on it.
+# The container sees roughly 6.5 GB of this machine's 8 GB, shared with
+# ChromeOS, and the game is 4.9 GB.
+CONTAINER_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 8192)
+LOWMEM_APPLIED=0
+if [ "$LOWMEM" = "1" ] && [ "$CONTAINER_MB" -lt 9000 ]; then LOWMEM_APPLIED=1; fi
+DXVK_MEM_MB=2048
+[ "$LOWMEM_APPLIED" = "1" ] && DXVK_MEM_MB=1024
+cat > "$APP_HOME/dxvk.conf" <<DXVKCONF
 # Report a generous VRAM figure: UE4 sizes its streaming pool from this and
 # an iGPU honestly reporting 256 MB makes the game thrash textures.
-dxgi.maxDeviceMemory = 2048
-dxgi.maxSharedMemory = 2048
+dxgi.maxDeviceMemory = ${DXVK_MEM_MB}
+dxgi.maxSharedMemory = ${DXVK_MEM_MB}
 d3d11.maxFeatureLevel = 11_0
 dxvk.enableStateCache = True
 dxvk.numCompilerThreads = 2
@@ -456,6 +467,23 @@ for f in Engine.ini Scalability.ini GameUserSettings.ini Input.ini; do
     ok "$f"
   fi
 done
+
+# --- low-memory trim -------------------------------------------------------
+# This Chromebook has 8 GB shared with ChromeOS, of which the container sees
+# about 6.5 GB, and the game is 4.9 GB. Loading the first real level is the
+# heaviest moment of the run: UE4 fills its texture streaming pool while
+# DXVK allocates its own. Overcommit here and the process is killed with no
+# error message at all, which looks exactly like a crash.
+if [ "$LOWMEM_APPLIED" = "1" ]; then
+  if true; then
+    sed -i -E 's/^r\.Streaming\.PoolSize=.*/r.Streaming.PoolSize=512/' "$CFG_DST/Engine.ini" 2>/dev/null || true
+    sed -i -E 's/^r\.Streaming\.MaxTempMemoryAllowed=.*/r.Streaming.MaxTempMemoryAllowed=48/' "$CFG_DST/Engine.ini" 2>/dev/null || true
+    # Stop the quality presets from putting the big pool back.
+    sed -i -E 's/^r\.Streaming\.PoolSize=1024/r.Streaming.PoolSize=512/; s/^r\.Streaming\.PoolSize=1500/r.Streaming.PoolSize=700/' \
+        "$CFG_DST/Scalability.ini" 2>/dev/null || true
+    ok "low-memory profile applied (${CONTAINER_MB} MB visible): streaming pool 512 MB"
+  fi
+fi
 
 # UE4 rewrites these on exit unless they are read-only; lock the two that the
 # options menu likes to stomp.

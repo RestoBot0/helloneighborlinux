@@ -348,12 +348,52 @@ if [ "$VDESK" = "1" ]; then
     log "virtual desktop: ${RES_W}x${RES_H}"
 fi
 
+# --- watch memory while the game runs --------------------------------------
+# A silent death with no Unreal error text is the signature of the process
+# being killed rather than crashing, and on an 8 GB Chromebook sharing RAM
+# with ChromeOS the usual killer is memory. Sample the low-water mark so we
+# can tell "ran out of memory" apart from "crashed".
+MEM_LOW_FILE="$(mktemp 2>/dev/null || echo /tmp/hn-memlow.$$)"
+awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo > "$MEM_LOW_FILE" 2>/dev/null
+(
+    while :; do
+        cur=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 99999)
+        low=$(cat "$MEM_LOW_FILE" 2>/dev/null || echo 99999)
+        [ "$cur" -lt "$low" ] 2>/dev/null && echo "$cur" > "$MEM_LOW_FILE"
+        sleep 2
+    done
+) & MEM_PID=$!
+# Both of these must swallow their status. set -e is active by the time this
+# is called, and wait() on a process we just killed returns 143, which would
+# otherwise abort the script before it logs anything.
+cleanup_mem() {
+    [ -n "${MEM_PID:-}" ] || return 0
+    kill "$MEM_PID" 2>/dev/null || true
+    wait "$MEM_PID" 2>/dev/null || true
+    MEM_PID=""
+    return 0
+}
+trap cleanup_mem EXIT INT TERM
+
 log "launching..."
 set +e
 "$WINE_BIN" "${LAUNCH_PREFIX[@]}" "$GAME_EXE" "${ARGS[@]}" >>"$LOG_FILE" 2>&1
 RC=$?
 set -e
 log "game exited rc=$RC"
+
+cleanup_mem
+MEM_LOW="$(cat "$MEM_LOW_FILE" 2>/dev/null || echo '?')"
+rm -f "$MEM_LOW_FILE"
+log "lowest free memory during the run: ${MEM_LOW} MB"
+if [ "$MEM_LOW" != "?" ] && [ "$MEM_LOW" -lt 350 ] 2>/dev/null; then
+    log "DIAGNOSIS: the machine very nearly ran out of memory."
+    log "  Re-run the installer with --lowmem for a leaner configuration."
+fi
+if dmesg 2>/dev/null | tail -80 | grep -qiE 'out of memory|oom-kill|killed process'; then
+    log "DIAGNOSIS: the kernel's out-of-memory killer terminated the game."
+    log "  Re-run the installer with --lowmem."
+fi
 
 # Wine returns non-zero for plenty of benign reasons; only shout if the game
 # died almost immediately, which is the signature of a real failure.
