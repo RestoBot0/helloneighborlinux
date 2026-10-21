@@ -141,8 +141,33 @@ GAME_EXE_DIR="$(dirname "$GAME_EXE")"
 # Venus. DXVK needs real Vulkan; if Venus is missing, DXVK silently falls over,
 # so we detect rather than assume.
 # ---------------------------------------------------------------------------
+# ChromeOS presets VK_ICD_FILENAMES to virtio_icd.{i686,x86_64}.json, but
+# Debian's Mesa ships the file as virtio_icd.json. A set-but-dangling
+# VK_ICD_FILENAMES is worse than an unset one: the loader honours it and skips
+# its own directory scan, so a perfectly good driver is reported as absent.
+# Drop entries that do not exist; unset the variable entirely if none survive.
+sanitise_vk_icd() {
+    [ -n "${VK_ICD_FILENAMES:-}" ] || return 0
+    _keep=""
+    _oldifs=$IFS; IFS=':'
+    for _f in $VK_ICD_FILENAMES; do
+        [ -e "$_f" ] && _keep="${_keep:+$_keep:}$_f"
+    done
+    IFS=$_oldifs
+    if [ -z "$_keep" ]; then
+        log "VK_ICD_FILENAMES pointed only at missing files -- unsetting it so the loader scans $ICD_DIR"
+        unset VK_ICD_FILENAMES
+    elif [ "$_keep" != "$VK_ICD_FILENAMES" ]; then
+        log "pruned dangling VK_ICD_FILENAMES entries -> $_keep"
+        export VK_ICD_FILENAMES="$_keep"
+    fi
+}
+
+ICD_DIR=/usr/share/vulkan/icd.d
+sanitise_vk_icd
+
 have_vulkan() {
-    [ -n "$(ls -A /usr/share/vulkan/icd.d/*.json 2>/dev/null)" ] || return 1
+    [ -n "$(ls -A "$ICD_DIR"/*.json 2>/dev/null)" ] || return 1
     if command -v vulkaninfo >/dev/null 2>&1; then
         timeout 15 vulkaninfo --summary >/dev/null 2>&1 || return 1
     fi

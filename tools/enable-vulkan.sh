@@ -107,6 +107,24 @@ else
   exit 1
 fi
 
+# ChromeOS exports, for every Crostini shell:
+#     VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/virtio_icd.i686.json:\
+#                      /usr/share/vulkan/icd.d/virtio_icd.x86_64.json
+# Debian's Mesa package installs the file as plain "virtio_icd.json" with no
+# architecture suffix. Because VK_ICD_FILENAMES is set, the Vulkan loader
+# trusts it exclusively and never scans the directory -- so it looks for two
+# names that do not exist and reports "Found no drivers!" even though the
+# driver is sitting right there. Symlink the names ChromeOS expects.
+ICD_DIR=/usr/share/vulkan/icd.d
+if [ -f "$ICD_DIR/virtio_icd.json" ]; then
+  for want in virtio_icd.x86_64.json virtio_icd.i686.json; do
+    if [ ! -e "$ICD_DIR/$want" ]; then
+      sudo ln -sfn virtio_icd.json "$ICD_DIR/$want"
+      ok "linked $want -> virtio_icd.json (the name ChromeOS looks for)"
+    fi
+  done
+fi
+
 echo
 if timeout 30 vulkaninfo --summary 2>&1 | grep -qiE 'driverName\s*=\s*venus|Venus'; then
   ok "${B}Venus is working -- hardware Vulkan is live${N}"
