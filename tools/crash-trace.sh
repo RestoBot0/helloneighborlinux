@@ -23,6 +23,7 @@ APP_HOME="$HOME/.local/share/$APP_ID"
 LAUNCH="$APP_HOME/bin/$APP_ID-launch"
 LOG_DIR="$APP_HOME/logs"
 OUT="$LOG_DIR/crash-trace.log"
+MARKER="$LOG_DIR/.crash-trace-marker"
 SECS=90
 QUICK=0
 
@@ -55,6 +56,12 @@ if [ "$QUICK" = "0" ]; then
   sleep 1
 
   rm -f "$LOG_DIR"/launch-*.log 2>/dev/null
+  # Drop a marker file the instant before launch. Anything under Saved/ that
+  # is newer than this was written by the GAME, not by the installer -- which
+  # has usually just rewritten every .ini itself and would otherwise look
+  # exactly like game activity.
+  touch "$MARKER"
+  sleep 1
   start=$(date +%s)
   # +seh      -> exception records and the unhandled-exception backtrace
   # +loaddll  -> every DLL actually loaded, so a failed import is visible
@@ -73,6 +80,43 @@ if [ "$QUICK" = "0" ]; then
 fi
 
 [ -s "$OUT" ] || { echo "No trace to read. Run it without --quick first." >&2; exit 1; }
+
+# --- 0. is the game even reading our config? --------------------------------
+# Everything this project tunes lives in .ini files under the prefix. If the
+# game writes to that folder it is definitely reading it; if it never touches
+# it, every .ini setting we have applied has been ignored and we have been
+# tuning a file nobody reads.
+section "game config"
+SAVED=""
+for d in "$APP_HOME"/prefix/drive_c/users/*/AppData/Local/HelloNeighbor/Saved; do
+  [ -d "$d" ] && { SAVED="$d"; break; }
+done
+if [ -z "$SAVED" ]; then
+  printf '%sno Saved folder under the prefix -- configs were never deployed%s\n' "$R" "$N"
+else
+  CFG="$SAVED/Config/WindowsNoEditor"
+  printf 'config dir: %s\n' "$CFG"
+  if grep -q 'bEnabled=false' "$CFG/Engine.ini" 2>/dev/null; then
+    printf '%sSteam subsystem is switched off in Engine.ini%s\n' "$G" "$N"
+  else
+    printf '%sEngine.ini does NOT carry the Steam switch-off -- reinstall%s\n' "$R" "$N"
+  fi
+  if [ -f "$MARKER" ]; then
+    printf '\nfiles written by the game itself since it was launched:\n'
+    touched="$(find "$SAVED" -type f -newer "$MARKER" 2>/dev/null | sed "s|$SAVED/||" | head -12)"
+    if [ -n "$touched" ]; then
+      printf '%s%s%s\n' "$G" "$touched" "$N"
+      printf '%s-> the game IS using this folder, so our .ini files are live%s\n' "$G" "$N"
+    else
+      printf '%snone%s\n' "$Y" "$N"
+      printf '%s-> the game wrote nothing here. Either it crashed before it got%s\n' "$Y" "$N"
+      printf '%s   the chance, or it keeps its settings somewhere else entirely%s\n' "$Y" "$N"
+      printf '%s   and every .ini we have tuned is being ignored.%s\n' "$Y" "$N"
+    fi
+  fi
+  printf '\nwhole Saved tree:\n'
+  find "$SAVED" -maxdepth 2 2>/dev/null | sed "s|$SAVED|Saved|" | head -15
+fi
 
 # --- 1. did a DLL fail to load? --------------------------------------------
 section "missing or broken DLLs"
