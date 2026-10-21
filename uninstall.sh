@@ -20,9 +20,12 @@ echo "Stopping any running instance..."
 echo "Removing the shelf entry and icons..."
 rm -f "$DESKTOP_DIR/$APP_ID.desktop" "$DESKTOP_DIR/$APP_ID-safe.desktop"
 for sz in 16 24 32 48 64 128 256 512; do
+  # $APP_ID.png plus every content-hashed variant the installer has made
   rm -f "$ICON_BASE/${sz}x${sz}/apps/$APP_ID.png"
+  find "$ICON_BASE/${sz}x${sz}/apps" -maxdepth 1 -name "$APP_ID-*.png" -delete 2>/dev/null || true
 done
 rm -f "$HOME/.local/share/pixmaps/$APP_ID.png"
+find "$HOME/.local/share/pixmaps" -maxdepth 1 -name "$APP_ID-*.png" -delete 2>/dev/null || true
 command -v update-desktop-database >/dev/null && update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 command -v gtk-update-icon-cache  >/dev/null && gtk-update-icon-cache -f -t "$ICON_BASE" 2>/dev/null || true
 

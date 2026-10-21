@@ -65,6 +65,44 @@ spending days on the platform underneath it.
 
 ---
 
+## The shelf/launcher still shows the old icon
+
+Two separate causes, both now handled by `./install.sh`.
+
+**1. The installer was overwriting it.** `install.sh` used to call
+`tools/extract-icon.sh` unconditionally, which pulls the artwork out of
+`HelloNeighbor.exe` and reinstalls it at every size — wiping the icon that had
+been installed moments earlier. Extraction is now opt-in (`--extract-icon`).
+
+**2. ChromeOS caches app icons outside the container.** A daemon called
+`garcon` watches the applications directories and reports the app list to
+ChromeOS, which then asks garcon for each icon — **but only when an app
+appears or disappears**. Editing the `.desktop` file, replacing the PNG, and
+`gtk-update-icon-cache` all change nothing, because the stale copy lives on
+the ChromeOS side where the container cannot reach it.
+
+The only reliable fix is to make the app *disappear and come back*:
+
+```bash
+./tools/refresh-icon.sh          # removes the entry, waits 25s, puts it back
+./tools/refresh-icon.sh --wait 90        # if 25s was not long enough
+./tools/refresh-icon.sh --image ~/my.png # set a new icon and refresh
+```
+
+A reinstall now does this automatically whenever a launcher entry already
+exists. The icon is also installed under a name derived from a hash of its own
+bytes (`hello-neighbor-bc1860e1`), so a changed image always arrives under a
+name ChromeOS has never cached.
+
+If the icon is **pinned to the shelf**, the pin holds its own copy: unpin it,
+then re-pin from the launcher. Worst case ChromeOS only releases it after a
+device restart — nothing inside Crostini can force that.
+
+Notes: ChromeOS accepts **PNG only** (SVG is ignored), and `.desktop` entries
+with `Terminal=true` are not shown at all.
+
+---
+
 **Always start here:** right-click the shelf icon → **Open the log folder**, and
 read the newest `launch-*.log`. It records the backend chosen, the exe found, the
 full argument list and Wine's output.

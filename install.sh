@@ -41,6 +41,8 @@ DO_DXVK=1
 KEEP_ARCHIVE=0
 LOWMEM=1           # 0 disables; trims memory use for 8 GB shared-RAM machines
 SAFE_ICON=0        # --safe-icon adds a second, troubleshooting-only launcher entry
+EXTRACT_ICON=0     # --extract-icon pulls the icon out of the game .exe instead
+ICON_REFRESH=1     # --no-icon-refresh skips the ChromeOS icon-cache dance
 COPY_GAME=0        # with --game-dir, use the files in place; --copy duplicates
 # DXVK 2.x wants Vulkan 1.3 and a few features Venus can lack; 1.10.3 is the
 # compatible fallback (--dxvk-ver 1.10.3) if 2.x reports "No adapters found".
@@ -71,6 +73,8 @@ while [ $# -gt 0 ]; do
     --copy)         COPY_GAME=1 ;;
     --in-place)     COPY_GAME=0 ;;
     --safe-icon)    SAFE_ICON=1 ;;
+    --extract-icon) EXTRACT_ICON=1 ;;
+    --no-icon-refresh) ICON_REFRESH=0 ;;
     --lowmem)       LOWMEM=1 ;;
     --no-lowmem)    LOWMEM=0 ;;
     --dxvk-ver)     shift; DXVK_VER="${1:-2.3.1}"; DXVK_VER_EXPLICIT=1 ;;
@@ -591,7 +595,7 @@ if [ -f "$SRC_DIR/launcher/$APP_ID.png" ]; then
   for sz in 16 24 32 48 64 128 256 512; do
     d="$ICON_BASE/${sz}x${sz}/apps"; mkdir -p "$d"
     if have convert; then
-      convert "$SRC_DIR/launcher/$APP_ID.png" -resize "${sz}x${sz}" "$d/$APP_ID.png" 2>/dev/null \
+      convert "$SRC_DIR/launcher/$APP_ID.png" -resize "${sz}x${sz}" -strip "$d/$APP_ID.png" 2>/dev/null \
         || cp -f "$SRC_DIR/launcher/$APP_ID.png" "$d/$APP_ID.png"
     else
       cp -f "$SRC_DIR/launcher/$APP_ID.png" "$d/$APP_ID.png"
@@ -602,10 +606,55 @@ if [ -f "$SRC_DIR/launcher/$APP_ID.png" ]; then
   ok "icon installed at 8 sizes"
 fi
 
-# The bundled icon is a stand-in. The game's own executable carries the real
-# artwork, which looks far better in the launcher -- use it when we can.
-if [ -x "$SRC_DIR/tools/extract-icon.sh" ]; then
+# This used to run unconditionally, on the theory that the artwork inside
+# HelloNeighbor.exe beats anything we ship. It does not any more -- the icon
+# in launcher/hello-neighbor.png is the real thing -- and running it silently
+# overwrote the icon installed four lines above, at every size, so the
+# launcher kept showing the .exe's version no matter what we put in the repo.
+# Now it is opt-in.
+if [ "$EXTRACT_ICON" = "1" ] && [ -x "$SRC_DIR/tools/extract-icon.sh" ]; then
   "$SRC_DIR/tools/extract-icon.sh" --game-dir "$GAME_DIR" 2>&1 | sed 's/^/  /' || true
+fi
+
+# --- cache-busting icon name -----------------------------------------------
+# ChromeOS caches an app's icon by name and is extremely reluctant to look at
+# it again. Giving the icon a name derived from its own contents means a
+# changed image is, as far as ChromeOS is concerned, a brand new icon it has
+# never seen -- so there is nothing stale to serve.
+ICON_NAME="$APP_ID"
+# Hash the untouched copy in pixmaps, never a convert(1) output: ImageMagick
+# stamps the creation time into the PNG, so resized files differ byte-for-byte
+# on every run and the name would churn on every reinstall.
+_master="$HOME/.local/share/pixmaps/$APP_ID.png"
+[ -f "$_master" ] || _master="$ICON_BASE/256x256/apps/$APP_ID.png"
+if [ -f "$_master" ]; then
+  _sum="$( { md5sum "$_master" 2>/dev/null || cksum "$_master"; } | cut -c1-8 )"
+  if [ -n "$_sum" ]; then
+    ICON_NAME="$APP_ID-$_sum"
+    for sz in 16 24 32 48 64 128 256 512; do
+      d="$ICON_BASE/${sz}x${sz}/apps"
+      # drop hashes from previous icons so they do not pile up
+      find "$d" -maxdepth 1 -name "$APP_ID-*.png" ! -name "$ICON_NAME.png" -delete 2>/dev/null || true
+      if [ -f "$d/$APP_ID.png" ]; then cp -f "$d/$APP_ID.png" "$d/$ICON_NAME.png"; fi
+    done
+    cp -f "$HOME/.local/share/pixmaps/$APP_ID.png" \
+          "$HOME/.local/share/pixmaps/$ICON_NAME.png" 2>/dev/null || true
+    ok "icon name for this image: $ICON_NAME"
+  fi
+fi
+unset _master _sum
+
+# Was there already a launcher entry? If so this is a reinstall, and ChromeOS
+# is holding an icon it will not willingly give up (see the refresh below).
+HAD_DESKTOP=0
+if [ -f "$DESKTOP_DIR/$APP_ID.desktop" ]; then HAD_DESKTOP=1; fi
+
+# If a previous run was interrupted mid-refresh, the launcher entry is still
+# sitting in the stash. Put it back before we do anything else.
+ICON_STASH="$APP_HOME/.icon-refresh"
+if [ -d "$ICON_STASH" ]; then
+  mv -f "$ICON_STASH"/*.desktop "$DESKTOP_DIR"/ 2>/dev/null || true
+  rmdir "$ICON_STASH" 2>/dev/null || true
 fi
 
 # --- .desktop --------------------------------------------------------------
@@ -617,7 +666,7 @@ Name=Hello Neighbor
 GenericName=Stealth Horror Game
 Comment=Sneak into your neighbour's house and find out what he's hiding
 Exec=$BIN_DIR/hello-neighbor-launch
-Icon=$APP_ID
+Icon=$ICON_NAME
 Terminal=false
 Categories=Game;ActionGame;AdventureGame;
 Keywords=hello;neighbor;neighbour;horror;stealth;tinybuild;
@@ -661,7 +710,7 @@ Name=Hello Neighbor (Safe Mode)
 GenericName=Stealth Horror Game
 Comment=Hello Neighbor in a small window on the OpenGL path, for troubleshooting
 Exec=$BIN_DIR/hello-neighbor-launch --safe --windowed
-Icon=$APP_ID
+Icon=$ICON_NAME
 Terminal=false
 Categories=Game;ActionGame;AdventureGame;
 Keywords=hello;neighbor;safe;troubleshoot;
@@ -682,6 +731,36 @@ if have desktop-file-validate; then
 fi
 have update-desktop-database && update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 have gtk-update-icon-cache && gtk-update-icon-cache -f -t "$ICON_BASE" 2>/dev/null || true
+
+# --- make ChromeOS actually look at the new icon ---------------------------
+# Inside the container, a daemon called garcon watches the applications
+# directories and reports the app list to ChromeOS. ChromeOS then asks garcon
+# for each app's icon -- but only when an app APPEARS or DISAPPEARS. Editing a
+# .desktop file in place, or swapping the PNG underneath it, is not a change
+# it will ever notice; the old icon is cached on the ChromeOS side, outside
+# the container, where nothing we run here can reach it.
+#
+# So: take the launcher entry away, let ChromeOS register that the app is
+# gone, then put it back. It comes back as a new app, with a fresh icon.
+# Only needed on a reinstall; a first install is already a brand new app.
+if [ "$HAD_DESKTOP" = "1" ] && [ "$ICON_REFRESH" = "1" ]; then
+  printf '    %s*%s refreshing the ChromeOS icon cache (~25s, do not close this)' "$G" "$N"
+  mkdir -p "$ICON_STASH"
+  mv -f "$DESKTOP_DIR/$APP_ID.desktop" "$ICON_STASH"/ 2>/dev/null || true
+  if [ -f "$DESKTOP_DIR/$APP_ID-safe.desktop" ]; then
+    mv -f "$DESKTOP_DIR/$APP_ID-safe.desktop" "$ICON_STASH"/ 2>/dev/null || true
+  fi
+  # garcon re-scans when this file is touched; apt uses the same hook.
+  sudo -n touch /usr/share/applications/.garcon_trigger 2>/dev/null || true
+  have update-desktop-database && update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+  for _i in 1 2 3 4 5 6 7 8 9 10 11 12; do sleep 2; printf '.'; done
+  mv -f "$ICON_STASH"/*.desktop "$DESKTOP_DIR"/ 2>/dev/null || true
+  rmdir "$ICON_STASH" 2>/dev/null || true
+  sudo -n touch /usr/share/applications/.garcon_trigger 2>/dev/null || true
+  have update-desktop-database && update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+  printf ' done\n'
+  ok "if the shelf still shows the old icon, unpin and re-pin it once"
+fi
 
 # ===========================================================================
 step "Finishing up"
