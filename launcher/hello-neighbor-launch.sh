@@ -60,6 +60,9 @@ FORCE_BACKEND=""      # "" | dxvk | wined3d
 # E_FAIL. Running inside "wine explorer /desktop=..." gives Wine one real
 # top-level X window that it owns outright, which sidesteps that.
 VDESK="${HN_VIRTUAL_DESKTOP:-0}"
+# Ask Unreal to write its own log. Cheap, and it names failures that Wine's
+# output cannot (missing assets, out-of-memory, shader problems).
+GAME_LOG="${HN_GAME_LOG:-1}"
 WINDOWED=0
 ENABLE_CONSOLE=1
 USE_SM4=0          # UE4 shipping builds rarely cook SM4 shaders
@@ -92,6 +95,7 @@ while [ $# -gt 0 ]; do
         --sm4)      USE_SM4=1 ;;
         --gl)       FORCE_BACKEND="wined3d" ;;
         --vdesk)    VDESK=1 ;;
+        --gamelog)  GAME_LOG=1 ;;
         --no-vdesk) VDESK=0 ;;
         --vk)       FORCE_BACKEND="dxvk" ;;
         --console)  ENABLE_CONSOLE=1 ;;
@@ -256,10 +260,18 @@ else
     # vkCreateSwapchainKHR fail -- which surfaces as UE4's
     # "CreateSwapChain ... E_FAIL". Only turn it on if the game renders but
     # tears or freezes on presentation.
-    if [ "${HN_VK_WSI_SW:-0}" = "1" ]; then
+    # Default: on inside Crostini. Confirmed necessary on the target machine
+    # -- without it UE4 died in Present() with 887A0020 after a few seconds;
+    # with it the game renders and reaches its loading screen.
+    _wsi="${HN_VK_WSI_SW:-auto}"
+    if [ "$_wsi" = "auto" ]; then
+        [ -e /dev/wl0 ] && _wsi=1 || _wsi=0
+    fi
+    if [ "$_wsi" = "1" ]; then
         export MESA_VK_WSI_DEBUG=sw
         log "Venus WSI workaround active (MESA_VK_WSI_DEBUG=sw)"
     fi
+    unset _wsi
     export DXVK_STATE_CACHE_PATH="$APP_HOME/cache/dxvk"
     export DXVK_LOG_PATH="$LOG_DIR"
     export DXVK_LOG_LEVEL=none
@@ -303,7 +315,7 @@ else
 fi
 
 [ "$ENABLE_CONSOLE" = "1" ] && ARGS+=("-console")
-[ "$DEBUG" = "1" ] && ARGS+=("-log")
+{ [ "$DEBUG" = "1" ] || [ "$GAME_LOG" = "1" ]; } && ARGS+=("-log")
 # shellcheck disable=SC2206
 [ -n "$EXTRA_GAME_ARGS" ] && ARGS+=($EXTRA_GAME_ARGS)
 
@@ -370,6 +382,16 @@ fi
 if grep -q "GL_RGBA8_SNORM" "$LOG_FILE" 2>/dev/null; then
     log "DIAGNOSIS: running on WineD3D, which cannot render this game."
     log "  Install the Vulkan driver: ./tools/enable-vulkan.sh"
+fi
+
+# UE4 writes its log deep inside the Wine prefix. Copy the newest one next
+# to ours so there is a single place to look.
+UE4_LOG="$(find "$WINEPREFIX/drive_c/users" -path '*HelloNeighbor/Saved/Logs/*' \
+             -name '*.log' -type f -printf '%T@ %p\n' 2>/dev/null \
+           | sort -rn | head -1 | cut -d' ' -f2-)"
+if [ -n "$UE4_LOG" ] && [ -f "$UE4_LOG" ]; then
+    cp -f "$UE4_LOG" "$LOG_DIR/ue4-latest.log" 2>/dev/null || true
+    log "UE4's own log copied to $LOG_DIR/ue4-latest.log"
 fi
 
 command -v wineserver >/dev/null && wineserver -w 2>/dev/null || true

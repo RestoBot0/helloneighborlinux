@@ -484,7 +484,8 @@ EXTRA_GAME_ARGS=""
 # error 887A0020 (DXGI_ERROR_DRIVER_INTERNAL_ERROR) after a few seconds.
 # 1 moves only the final "copy the frame into the window" step to the CPU.
 # All rendering stays on the GPU, so the cost is small.
-HN_VK_WSI_SW=0
+# auto = on inside Crostini, which is what this machine needs.
+HN_VK_WSI_SW=auto
 
 # Run inside a single Wine-owned window. Helps when ChromeOS's window
 # handling confuses the game.
