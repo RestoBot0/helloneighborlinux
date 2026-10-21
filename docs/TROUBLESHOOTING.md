@@ -546,3 +546,39 @@ limit so a Wine error dialog cannot stall the run, recognises the known
 failure signatures, restores `dxvk.conf` afterwards and prints a summary
 table. `--seconds N` changes the per-attempt time limit and `--only N` runs a
 single row.
+
+### Reading the exit code
+
+Wine reports a Windows exit status through an 8-bit shell exit code, so the
+status gets truncated. The low byte is what reaches the log:
+
+| `rc=` | Windows status | Meaning |
+|---|---|---|
+| 0 | - | clean exit |
+| 3 | - | our `winevulkan` assertion (`loader_thunks.c`) |
+| 5 | `0xC0000005` | access violation -- a crash *inside the game's own code* |
+| 11 | `0xC000000B` | segmentation fault |
+| 53 | `0xC0000135` | a DLL was not found |
+
+`rc=5` is the important one to recognise: it is not a graphics-stack failure,
+it is the game dereferencing a bad pointer. Chasing Vulkan settings will not
+help once you are seeing `rc=5`.
+
+### Getting a backtrace
+
+The launcher historically ran Wine with `WINEDEBUG=-all`. That is good for
+speed but it also discards Wine's `err:` channel, so a missing DLL or an
+access violation left nothing in the log at all. The default is now
+`fixme-all`, which keeps real errors and drops only the harmless noise, and
+`HN_WINEDEBUG` overrides it.
+
+For a crash with no obvious cause:
+
+```bash
+./tools/crash-trace.sh
+```
+
+It runs the game once with `+seh,+loaddll`, then prints only the parts that
+matter: failed imports, unimplemented Wine functions, the exception record
+with routine C++ throws filtered out, the faulting module, and the decoded
+exit code. `--quick` re-reads the previous trace without relaunching.

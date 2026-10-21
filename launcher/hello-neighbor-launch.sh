@@ -245,10 +245,16 @@ log "graphics backend: $BACKEND"
 # ---------------------------------------------------------------------------
 export WINEARCH=win64
 export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
+# WINEDEBUG=-all used to be the default here for speed. It also silences
+# Wine's own err: messages, which meant a missing DLL or an access violation
+# left no trace at all in the log -- the only clue was a truncated exit code.
+# "fixme-all" keeps the err channel (cheap, rare) and drops the fixme spam
+# (noisy, harmless). HN_WINEDEBUG overrides it, which is how
+# tools/crash-trace.sh asks for an exception backtrace.
 if [ "$DEBUG" = "1" ]; then
-    export WINEDEBUG="warn+all,fixme-all"
+    export WINEDEBUG="${HN_WINEDEBUG:-warn+all,fixme-all}"
 else
-    export WINEDEBUG="-all"
+    export WINEDEBUG="${HN_WINEDEBUG:-fixme-all}"
 fi
 
 # faster synchronisation primitives; harmless if the wine build lacks them
