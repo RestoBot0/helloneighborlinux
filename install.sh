@@ -39,6 +39,9 @@ DO_DEPS=1
 DO_DXVK=1
 KEEP_ARCHIVE=0
 COPY_GAME=0        # with --game-dir, use the files in place; --copy duplicates
+# DXVK 2.x wants Vulkan 1.3 and a few features Venus can lack; 1.10.3 is the
+# compatible fallback (--dxvk-ver 1.10.3) if 2.x reports "No adapters found".
+DXVK_VER="2.3.1"
 
 # --- pretty output ---------------------------------------------------------
 if [ -t 1 ]; then
@@ -63,6 +66,7 @@ while [ $# -gt 0 ]; do
     --keep-archive) KEEP_ARCHIVE=1 ;;
     --copy)         COPY_GAME=1 ;;
     --in-place)     COPY_GAME=0 ;;
+    --dxvk-ver)     shift; DXVK_VER="${1:-2.3.1}" ;;
     -h|--help)      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option: $1  (try --help)" ;;
   esac
@@ -314,7 +318,6 @@ else
 fi
 
 if [ "$DO_DXVK" = "1" ]; then
-  DXVK_VER="2.3.1"
   TMPD="$(mktemp -d)"
   if curl -fsSL -o "$TMPD/dxvk.tar.gz" \
       "https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VER}/dxvk-${DXVK_VER}.tar.gz" 2>/dev/null; then
