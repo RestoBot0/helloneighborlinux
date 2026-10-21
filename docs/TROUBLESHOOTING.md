@@ -103,6 +103,50 @@ with `Terminal=true` are not shown at all.
 
 ---
 
+## Installing mods
+
+Use `./tools/install-mod.sh <the thing you downloaded>` — zip, rar or folder.
+
+Hello Neighbor loads mods the way UE4 loads plugins. The game scans
+`HelloNeighbor/Mods/`, finds a `.uplugin` descriptor in each sub-folder, and
+mounts the `.pak` packed inside it:
+
+```
+HelloNeighbor/Mods/
+  MyMod/
+    MyMod.uplugin
+    Content/Paks/.../MyMod.pak
+```
+
+**Which mods work in the game?** Only ones containing a `.pak`. If a download
+has a `.uplugin` and loose `.uasset` files but no `.pak`, it is a **Mod Kit**
+mod: it runs inside the Hello Neighbor Mod Kit editor (free on the Epic
+launcher, ~25 GB), never in the retail game.
+
+**The three reasons a good mod never appears in the MODDING menu**, all of
+which `install-mod.sh` fixes automatically:
+
+1. The folder name does not match the `.uplugin` name. Downloads arrive as
+   `TheNeighborsComeback2/` holding `TheNeighborsComeback.uplugin` all the
+   time, and the game then shows nothing.
+2. Spaces in the folder name.
+3. It is still a `.zip`. It has to be extracted.
+
+A bare `.pak` with no descriptor is also accepted — those go straight into
+`Mods/` as a single file.
+
+```bash
+./tools/install-mod.sh ~/Downloads/SomeMod.zip   # install
+./tools/install-mod.sh --check ~/Downloads/x.zip # inspect, install nothing
+./tools/install-mod.sh --list                    # what is installed, with warnings
+./tools/install-mod.sh --remove MyMod            # uninstall
+```
+
+Some older mods were built against game version 1.1.9 and will not load on
+the full release wherever they are put.
+
+---
+
 **Always start here:** right-click the shelf icon → **Open the log folder**, and
 read the newest `launch-*.log`. It records the backend chosen, the exe found, the
 full argument list and Wine's output.
