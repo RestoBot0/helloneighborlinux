@@ -38,7 +38,8 @@ echo "  Mesa (GL):  $(glxinfo -B 2>/dev/null | awk -F': ' '/OpenGL version/{prin
 echo "  Renderer:   $(glxinfo -B 2>/dev/null | awk -F': ' '/OpenGL renderer/{print $2}' || echo '?')"
 echo "  ICDs:       $(ls /usr/share/vulkan/icd.d/ 2>/dev/null | tr '\n' ' ')"
 
-if ls /usr/share/vulkan/icd.d/virtio_icd*.json >/dev/null 2>&1; then
+if [ -f /usr/share/vulkan/icd.d/virtio_icd.json ] \
+   || [ -f /usr/share/vulkan/icd.d/virtio_icd.x86_64.json ]; then
   ok "virtio_icd (Venus) is already installed"
   ALREADY=1
 else
@@ -115,14 +116,34 @@ fi
 # trusts it exclusively and never scans the directory -- so it looks for two
 # names that do not exist and reports "Found no drivers!" even though the
 # driver is sitting right there. Symlink the names ChromeOS expects.
+#
+# Create ONLY the x86_64 name. Linking the i686 name as well looks harmless
+# but is not: both names then resolve to the same file, the loader opens the
+# Venus driver twice, and one GPU is enumerated as two identical adapters.
+# DXVK then creates its surface through one and queries it through the
+# other, and Wine aborts in the winevulkan thunk for
+# vkGetPhysicalDeviceSurfaceFormatsKHR. The loader simply ignores the
+# missing i686 entry, which is the behaviour we want.
 ICD_DIR=/usr/share/vulkan/icd.d
 if [ -f "$ICD_DIR/virtio_icd.json" ]; then
-  for want in virtio_icd.x86_64.json virtio_icd.i686.json; do
-    if [ ! -e "$ICD_DIR/$want" ]; then
-      sudo ln -sfn virtio_icd.json "$ICD_DIR/$want"
-      ok "linked $want -> virtio_icd.json (the name ChromeOS looks for)"
-    fi
-  done
+  if [ ! -e "$ICD_DIR/virtio_icd.x86_64.json" ]; then
+    sudo ln -sfn virtio_icd.json "$ICD_DIR/virtio_icd.x86_64.json"
+    ok "linked virtio_icd.x86_64.json -> virtio_icd.json (the name ChromeOS looks for)"
+  fi
+  # Undo the duplicate an earlier version of this script may have created.
+  if [ -L "$ICD_DIR/virtio_icd.i686.json" ] \
+     && [ "$(readlink -f "$ICD_DIR/virtio_icd.i686.json")" = "$(readlink -f "$ICD_DIR/virtio_icd.json")" ]; then
+    sudo rm -f "$ICD_DIR/virtio_icd.i686.json"
+    ok "removed the duplicate virtio_icd.i686.json link (it made one GPU appear as two)"
+  fi
+fi
+
+# Report how many adapters the loader actually sees. More than one entry for
+# the same device means something is still duplicated.
+if command -v vulkaninfo >/dev/null 2>&1; then
+  _n="$(timeout 20 vulkaninfo --summary 2>/dev/null | grep -c 'deviceName' || true)"
+  [ -n "$_n" ] && echo "    GPUs visible to Vulkan: ${_n}"
+  [ "${_n:-0}" -gt 1 ] 2>/dev/null && warn "more than one adapter is listed -- that is usually a duplicated ICD"
 fi
 
 echo

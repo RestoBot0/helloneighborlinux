@@ -177,19 +177,44 @@ GAME_EXE_DIR="$(dirname "$GAME_EXE")"
 # Drop entries that do not exist; unset the variable entirely if none survive.
 sanitise_vk_icd() {
     [ -n "${VK_ICD_FILENAMES:-}" ] || return 0
-    _keep=""
+    _keep=""; _seen=""
     _oldifs=$IFS; IFS=':'
     for _f in $VK_ICD_FILENAMES; do
-        [ -e "$_f" ] && _keep="${_keep:+$_keep:}$_f"
+        IFS=$_oldifs
+        # Drop entries that do not exist.
+        [ -e "$_f" ] || { IFS=':'; continue; }
+        # Drop entries that are different names for the SAME driver. Debian
+        # ships one architecture-neutral virtio_icd.json, and the symlinks we
+        # add so ChromeOS's preset VK_ICD_FILENAMES resolves both point at it.
+        # Listing both makes the loader open the driver twice, which
+        # enumerates one GPU as two adapters -- DXVK then creates a surface
+        # on one and queries it on the other, and Wine's winevulkan thunk
+        # for vkGetPhysicalDeviceSurfaceFormatsKHR aborts the process.
+        _real="$(readlink -f "$_f" 2>/dev/null || echo "$_f")"
+        case ":$_seen:" in
+            *":$_real:"*) log "skipping duplicate ICD $(basename "$_f") (same driver as an earlier entry)"; IFS=':'; continue ;;
+        esac
+        _seen="${_seen:+$_seen:}$_real"
+        _keep="${_keep:+$_keep:}$_f"
+        IFS=':'
     done
     IFS=$_oldifs
     if [ -z "$_keep" ]; then
-        log "VK_ICD_FILENAMES pointed only at missing files -- unsetting it so the loader scans $ICD_DIR"
-        unset VK_ICD_FILENAMES
+        # Prefer the real virtio ICD over letting the loader scan, because the
+        # directory also holds intel/radeon/lvp/gfxstream entries that are
+        # either wrong for this VM or CPU-only.
+        if [ -f "$ICD_DIR/virtio_icd.json" ]; then
+            log "VK_ICD_FILENAMES pointed only at missing files -- using $ICD_DIR/virtio_icd.json"
+            export VK_ICD_FILENAMES="$ICD_DIR/virtio_icd.json"
+        else
+            log "VK_ICD_FILENAMES pointed only at missing files -- unsetting it so the loader scans $ICD_DIR"
+            unset VK_ICD_FILENAMES
+        fi
     elif [ "$_keep" != "$VK_ICD_FILENAMES" ]; then
-        log "pruned dangling VK_ICD_FILENAMES entries -> $_keep"
+        log "VK_ICD_FILENAMES cleaned up -> $_keep"
         export VK_ICD_FILENAMES="$_keep"
     fi
+    unset _keep _seen _real _f _oldifs
 }
 
 ICD_DIR=/usr/share/vulkan/icd.d

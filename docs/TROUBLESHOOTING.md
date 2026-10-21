@@ -463,3 +463,53 @@ The installer also now writes `dxgi.syncInterval = 0` into `dxvk.conf`.
 Venus's queued (vsync/FIFO) present path is the one that misbehaves, and
 ChromeOS composites and paces frames itself, so there is nothing to gain by
 waiting on it inside the game.
+
+---
+
+## `loader_thunks.c ... vkGetPhysicalDeviceSurfaceFormatsKHR` on modern Wine
+
+**Symptom.** With a current Wine (9/10/11) and DXVK 2.x:
+
+```
+Assertion failed!
+File: dlls/winevulkan/loader_thunks.c
+Expression: !status && "vkGetPhysicalDeviceSurfaceFormatsKHR"
+```
+
+**Do not** read this as "Wine is too old" — that is the *other* thunk
+assertion, documented above. Check the adapter list first:
+
+```bash
+vulkaninfo --summary | grep deviceName
+```
+
+If your single GPU is listed **twice**, that is the problem:
+
+```
+deviceName = Virtio-GPU Venus (Intel(R) Xe Graphics (TGL GT2))
+deviceName = Virtio-GPU Venus (Intel(R) Xe Graphics (TGL GT2))
+```
+
+**Cause.** Debian ships one architecture-neutral `virtio_icd.json`, whose
+`library_path` is relative so the loader resolves it per-process. ChromeOS's
+preset `VK_ICD_FILENAMES` names `virtio_icd.i686.json` and
+`virtio_icd.x86_64.json`, so it is tempting to symlink *both* to it. Doing so
+makes the loader open the same driver twice and enumerate one GPU as two
+identical adapters. DXVK then creates its surface through one instance and
+queries formats through the other; the driver rejects the mismatch, the Unix
+call returns a non-zero status, and the generated thunk aborts.
+
+**Fix.** Keep only the `x86_64` link. The loader ignores the missing `i686`
+entry, which is exactly what we want:
+
+```bash
+sudo rm -f /usr/share/vulkan/icd.d/virtio_icd.i686.json
+```
+
+`tools/enable-vulkan.sh` now creates only the `x86_64` name and removes an
+i686 duplicate left by earlier versions. The launcher independently
+de-duplicates `VK_ICD_FILENAMES` by resolved path at startup, so the game
+still works on a system where the stray link is present.
+
+> Verify with `vulkaninfo --summary | grep -c deviceName` -- it should print
+> `1`.
