@@ -540,8 +540,10 @@ ${G}${B}  Done.${N}
   Everything key, type "Hello", and it's there. Right-click it and pick
   ${B}Pin to shelf${N} and you never have to open a terminal again.
 
-  Right-clicking the icon also gives you:
-      Play in a window / Safe mode / Force quit / Open logs
+  There is a second icon, ${B}Hello Neighbor (Safe Mode)${N}, for when the normal
+  one misbehaves: smaller window, OpenGL instead of Vulkan. ChromeOS does
+  not show the right-click "Desktop Actions" that other Linux desktops do,
+  so Safe Mode ships as its own icon rather than a menu item.
 
   First launch compiles shaders, so it will be slower and may sit on a
   black screen for up to a minute. That is normal and happens once.
