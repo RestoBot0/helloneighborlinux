@@ -45,32 +45,59 @@ printf 'total size: %s in %s files\n' \
   "$(du -shL "$GAME_DIR" 2>/dev/null | cut -f1)" \
   "$(find -L "$GAME_DIR" -type f 2>/dev/null | wc -l)"
 
-# --- the content paks -------------------------------------------------------
-# A cooked UE4 game keeps essentially everything in Content/Paks. If that is
-# missing or small, nothing else matters.
-section "content paks"
-mapfile -t PAKS < <(find -L "$GAME_DIR" -type f -iname '*.pak' -printf '%s %p\n' 2>/dev/null | sort -rn)
-if [ "${#PAKS[@]}" -eq 0 ]; then
-  printf '%sNO .pak FILES AT ALL.%s\n' "$R" "$N"
-  printf 'A cooked Unreal game keeps its content in Content/Paks/*.pak.\n'
-  printf 'Without them the engine starts, shows the logo, then dies as soon\n'
-  printf 'as it tries to load a level -- which is the symptom we have.\n'
+# --- what kind of build is this? -------------------------------------------
+# Unreal packages a game in one of three shapes and a Shipping .exe can only
+# load the first two:
+#
+#   cooked + paked : everything inside Content/Paks/*.pak
+#   cooked, loose  : .uasset files on disk, each paired with a .uexp
+#   uncooked       : editor project content, .uasset with NO .uexp
+#
+# The .uexp pairing is the reliable tell. Cooking splits every asset into a
+# header (.uasset) and its exports (.uexp), with bulk data in .ubulk. Editor
+# assets are a single self-contained .uasset. So "lots of .uasset and no
+# .uexp" means this is raw project content that a Shipping build cannot
+# load -- it will start, show its logo, and die when it reaches for a map.
+section "what kind of build this is"
+count_ext() { find -L "$GAME_DIR" -type f -iname "*.$1" 2>/dev/null | wc -l; }
+N_PAK="$(count_ext pak)"; N_UASSET="$(count_ext uasset)"
+N_UEXP="$(count_ext uexp)"; N_UBULK="$(count_ext ubulk)"
+N_UMAP="$(count_ext umap)"; N_UPROJECT="$(count_ext uproject)"
+printf '  %-28s %s\n' ".pak (packaged content)"  "$N_PAK"
+printf '  %-28s %s\n' ".uasset (asset headers)"  "$N_UASSET"
+printf '  %-28s %s\n' ".uexp (cooked exports)"   "$N_UEXP"
+printf '  %-28s %s\n' ".ubulk (cooked bulk data)" "$N_UBULK"
+printf '  %-28s %s\n' ".umap (levels)"           "$N_UMAP"
+printf '  %-28s %s\n' ".uproject (editor project)" "$N_UPROJECT"
+
+GAME_PAKS="$(find -L "$GAME_DIR" -type f -iname '*.pak' -ipath '*Content/Paks*' 2>/dev/null | wc -l)"
+printf '\n'
+if [ "$GAME_PAKS" -gt 0 ]; then
+  printf '%sCooked and packaged.%s Content is in Content/Paks, which is what a\n' "$G" "$N"
+  printf 'retail build normally looks like.\n'
+elif [ "$N_UEXP" -gt 0 ]; then
+  printf '%sCooked, stored as loose files.%s Unusual but valid: the assets are\n' "$G" "$N"
+  printf 'cooked (%s .uexp files) and simply were not packed into a .pak.\n' "$N_UEXP"
+  printf 'A Shipping build can load this.\n'
+elif [ "$N_UASSET" -gt 0 ]; then
+  printf '%sUNCOOKED EDITOR CONTENT.%s %s .uasset files and not a single .uexp.\n' "$R" "$N" "$N_UASSET"
+  printf '\nThis is raw project content, the kind the Unreal Editor works with.\n'
+  printf 'HelloNeighbor-Win64-Shipping.exe cannot load it. It will initialise,\n'
+  printf 'render its logo, and then die when it tries to open a level -- which\n'
+  printf 'is exactly the crash being chased.\n'
   note_problem
 else
-  total=0
-  for row in "${PAKS[@]}"; do
-    sz="${row%% *}"; path="${row#* }"
-    total=$((total + sz))
-    printf '  %10s  %s\n' "$(human "$sz")" "${path#"$GAME_DIR"/}"
-  done
-  printf '  %s-------------%s\n' "$B" "$N"
-  printf '  %10s  total in %s pak file(s)\n' "$(human "$total")" "${#PAKS[@]}"
-  if [ "$total" -lt 1000000000 ]; then
-    printf '\n%sThat is under 1 GB, which is too small for this game.%s\n' "$R" "$N"
-    note_problem
-  else
-    printf '\n%sPak size looks plausible.%s\n' "$G" "$N"
-  fi
+  printf '%sNo Unreal content found at all.%s\n' "$R" "$N"
+  note_problem
+fi
+
+# Editor-only engine content is another strong hint that this folder is a
+# project tree rather than a packaged game.
+EDITORDIRS="$(find -L "$GAME_DIR/Engine/Content" -maxdepth 1 -type d -iname 'Editor*' 2>/dev/null | wc -l)"
+if [ "$EDITORDIRS" -gt 0 ]; then
+  printf '\n%sEngine/Content holds %s Editor* folders.%s A packaged game has none;\n' \
+    "$Y" "$EDITORDIRS" "$N"
+  printf 'cooking strips editor-only content out.\n'
 fi
 
 # --- truncation -------------------------------------------------------------
@@ -102,7 +129,7 @@ check_one() { # check_one <description> <find-args...>
   fi
 }
 check_one "shipping executable"      -type f -iname 'HelloNeighbor-Win64-Shipping.exe'
-check_one "Content/Paks folder"      -type d -ipath '*Content/Paks'
+check_one "game Content folder"      -type d -ipath '*HelloNeighbor/Content'
 check_one "Engine folder"            -type d -iname 'Engine' -maxdepth 2
 check_one "Engine/Content"           -type d -ipath '*Engine/Content'
 check_one "game AssetRegistry"       -type f -iname 'AssetRegistry.bin'
@@ -114,7 +141,7 @@ find -L "$GAME_DIR" -maxdepth 3 -type d 2>/dev/null \
   | sed "s|$GAME_DIR|.|" | sort | head -25
 
 section "largest files"
-find -L "$GAME_DIR" -type f -printf '%s %p\n' 2>/dev/null | sort -rn | head -8 \
+find -L "$GAME_DIR" -type f -printf '%s %p\n' 2>/dev/null | sort -rn 2>/dev/null | head -8 \
   | while read -r sz path; do printf '  %10s  %s\n' "$(human "$sz")" "${path#"$GAME_DIR"/}"; done
 
 # --- verdict ----------------------------------------------------------------
