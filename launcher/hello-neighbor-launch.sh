@@ -81,13 +81,15 @@ _env_vdesk="${HN_VIRTUAL_DESKTOP-}"
 _env_wine="${HN_WINE-}"
 _env_windowed="${HN_WINDOWED-}"
 _env_sync="${HN_WINESYNC-}"
+_env_nosound="${HN_NOSOUND-}"
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 [ -n "$_env_wsi" ]   && HN_VK_WSI_SW="$_env_wsi"
 [ -n "$_env_vdesk" ] && VDESK="$_env_vdesk"
 [ -n "$_env_wine" ]  && HN_WINE="$_env_wine"
 [ -n "$_env_windowed" ] && WINDOWED="$_env_windowed"
 [ -n "$_env_sync" ] && HN_WINESYNC="$_env_sync"
-unset _env_wsi _env_vdesk _env_wine _env_windowed _env_sync
+[ -n "$_env_nosound" ] && HN_NOSOUND="$_env_nosound"
+unset _env_wsi _env_vdesk _env_wine _env_windowed _env_sync _env_nosound
 # conf may override where the game lives, so re-resolve after sourcing it
 [ -n "${HN_GAME_DIR:-}" ] && GAME_DIR="$HN_GAME_DIR"
 
@@ -253,6 +255,17 @@ log "graphics backend: $BACKEND"
 # ---------------------------------------------------------------------------
 export WINEARCH=win64
 export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
+
+# Audio is the one major subsystem this project has never tested without.
+# Crostini reaches the host sound server through a bridge, Wine drives it
+# through winepulse, and a fault inside libpulse lands on the Unix stack --
+# exactly where the exception frames in our traces are, far outside the
+# Windows stack range Wine knows about. HN_NOSOUND=1 removes the whole path:
+# Wine loads no audio driver at all and Unreal is told not to open a device.
+if [ "${HN_NOSOUND:-0}" = "1" ]; then
+    WINEDLLOVERRIDES="$WINEDLLOVERRIDES;winepulse.drv,winealsa.drv,wineoss.drv,winecoreaudio.drv="
+    export WINEDLLOVERRIDES
+fi
 # WINEDEBUG=-all used to be the default here for speed. It also silences
 # Wine's own err: messages, which meant a missing DLL or an access violation
 # left no trace at all in the log -- the only clue was a truncated exit code.
@@ -293,11 +306,14 @@ else
     export WINEFSYNC=0
     unset WINEESYNC WINEFSYNC
 fi
+_sndnote="audio on"
+[ "${HN_NOSOUND:-0}" = "1" ] && _sndnote="audio OFF"
 if [ "${HN_WINESYNC:-1}" = "1" ]; then
-    log "esync/fsync on; open-file limit $(ulimit -n)"
+    log "esync/fsync on; open files $(ulimit -n)/$(ulimit -Hn); $_sndnote"
 else
-    log "esync/fsync OFF (HN_WINESYNC=0); open-file limit $(ulimit -n)"
+    log "esync/fsync OFF; open files $(ulimit -n)/$(ulimit -Hn); $_sndnote"
 fi
+unset _sndnote
 
 # --- Crostini audio ---------------------------------------------------------
 # The default 20ms Pulse latency crackles badly through the ChromeOS audio
@@ -389,6 +405,7 @@ else
     ARGS+=("-dx11")
 fi
 
+[ "${HN_NOSOUND:-0}" = "1" ] && ARGS+=("-nosound")
 [ "$ENABLE_CONSOLE" = "1" ] && ARGS+=("-console")
 { [ "$DEBUG" = "1" ] || [ "$GAME_LOG" = "1" ]; } && ARGS+=("-log")
 # shellcheck disable=SC2206
@@ -527,9 +544,19 @@ if grep -q 'not in stack limits\|call_seh_handlers invalid frame' "$LOG_FILE" 2>
     log "DIAGNOSIS: a worker thread's exception frame was corrupt."
     log "  Wine could not dispatch the exception, so Unreal never got to"
     log "  write a crash report. This is usually synchronisation, not"
-    log "  graphics. Try with Wine's experimental sync primitives off:"
-    log "    HN_WINESYNC=0 $0"
-    log "  open-file limit for this run was $(ulimit -n); esync needs a high one."
+    log "  graphics. Things to rule out, in order:"
+    if [ "${HN_WINESYNC:-1}" = "1" ]; then
+        log "    HN_WINESYNC=0 $0"
+        log "      (open files this run: $(ulimit -n); esync needs a high limit)"
+    else
+        log "    esync/fsync were already off this run, so they are not the cause"
+    fi
+    if [ "${HN_NOSOUND:-0}" = "0" ]; then
+        log "    HN_NOSOUND=1 $0"
+        log "      (removes Wine's audio driver and Unreal's audio device)"
+    else
+        log "    audio was already off this run, so it is not the cause"
+    fi
 fi
 
 # Unreal writes a crash report of its own even in a Shipping build, under

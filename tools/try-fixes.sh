@@ -87,6 +87,10 @@ ATTEMPTS=(
   "Wine sync primitives off|0|1|0|0||HN_WINESYNC=0"
   "Wine sync off + no pipeline libraries|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False|HN_WINESYNC=0"
   "Wine sync off + virtual desktop|0|1|1|0||HN_WINESYNC=0"
+  "no audio|0|1|0|0||HN_NOSOUND=1"
+  "no audio + Wine sync off|0|1|0|0||HN_NOSOUND=1 HN_WINESYNC=0"
+  "no audio + no pipeline libraries|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False|HN_NOSOUND=1"
+  "no audio + virtual desktop|0|1|1|0||HN_NOSOUND=1"
 )
 
 # Known failure signatures, most specific first.
