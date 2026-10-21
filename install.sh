@@ -468,7 +468,14 @@ d3d11.cachedDynamicResources = cr
 # deferSurfaceCreation delays the real Vulkan surface until the first
 # Present, by which point the window exists. This is DXVK's standard
 # workaround for exactly this failure.
-dxgi.deferSurfaceCreation = True
+#
+# DISABLED on 2026-10-21. That failure was a Wine 8 problem. Measured on the
+# reference Chromebook under Wine 11.10 + DXVK 2.3.1 with tools/try-fixes.sh:
+# with this setting ON the game died almost immediately, and with it OFF the
+# game reached the tinyBuild loading screen. Deferring the surface had become
+# the cause rather than the cure. Re-enable with:
+#   ./tools/try-fixes.sh --only 3
+# dxgi.deferSurfaceCreation = True
 
 # Never let the game ask for a real display mode change: meaningless in a
 # Crostini window and another source of swap-chain failures.
