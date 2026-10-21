@@ -313,7 +313,9 @@ fi
 if [ "$VULKAN_OK" = "1" ]; then
   ok "Vulkan is available (Venus passthrough working)"
 else
-  warn "No usable Vulkan -- will use the OpenGL/VirGL path with DX10/SM4"
+  warn "No usable Vulkan -- falling back to the OpenGL/VirGL path (WineD3D)"
+  warn "UE4 titles crash on WineD3D here (GL_RGBA8_SNORM buffer views)."
+  warn "Run ./tools/enable-vulkan.sh to install the Venus driver, then re-run this."
   DO_DXVK=0
 fi
 
@@ -323,19 +325,56 @@ if [ "$DO_DXVK" = "1" ]; then
       "https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VER}/dxvk-${DXVK_VER}.tar.gz" 2>/dev/null; then
     tar -xzf "$TMPD/dxvk.tar.gz" -C "$TMPD"
     SYS32="$WINEPREFIX/drive_c/windows/system32"
+    if [ ! -d "$SYS32" ]; then
+      warn "Wine prefix looks incomplete ($SYS32 missing) -- skipping DXVK"
+      DO_DXVK=0
+    fi
+  else
+    warn "could not download DXVK $DXVK_VER -- staying on WineD3D"
+    DO_DXVK=0
+  fi
+  if [ "$DO_DXVK" = "1" ]; then
+    # DXVK 2.x no longer ships d3d10core.dll. Only override a DLL we actually
+    # copied -- pointing Wine at a "native" DLL that is not there makes the
+    # loader fail outright instead of falling back to the builtin.
+    COPIED=""
     for dll in d3d11 dxgi d3d10core d3d9; do
       src="$TMPD/dxvk-${DXVK_VER}/x64/${dll}.dll"
-      [ -f "$src" ] && cp -f "$src" "$SYS32/${dll}.dll"
+      if [ -f "$src" ]; then
+        cp -f "$src" "$SYS32/${dll}.dll"
+        COPIED="${COPIED:+$COPIED }$dll"
+      fi
     done
-    wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d11   /d native /f >/dev/null 2>&1
-    wine reg add 'HKCU\Software\Wine\DllOverrides' /v dxgi    /d native /f >/dev/null 2>&1
-    wine reg add 'HKCU\Software\Wine\DllOverrides' /v d3d10core /d native /f >/dev/null 2>&1
-    touch "$WINEPREFIX/.dxvk-installed"
-    ok "DXVK $DXVK_VER installed -> DirectX 11 runs on Vulkan"
-  else
-    warn "DXVK download failed -- falling back to WineD3D"
+    if [ -n "$COPIED" ]; then
+      for dll in $COPIED; do
+        wine reg add 'HKCU\Software\Wine\DllOverrides' /v "$dll" /d native /f >/dev/null 2>&1 || true
+      done
+      touch "$WINEPREFIX/.dxvk-installed"
+      ok "DXVK $DXVK_VER installed -> DirectX 11 runs on Vulkan"
+      ok "overrode: $COPIED"
+    else
+      warn "DXVK archive had no x64 DLLs -- staying on WineD3D"
+      DO_DXVK=0
+    fi
+  fi
+  if [ "$DO_DXVK" = "1" ] && [ ! -f "$WINEPREFIX/.dxvk-installed" ]; then
+    warn "DXVK could not be set up -- falling back to WineD3D"
+    DO_DXVK=0
   fi
   rm -rf "$TMPD"
+fi
+
+if [ "$DO_DXVK" = "0" ] && [ -f "$WINEPREFIX/.dxvk-installed" ]; then
+  # A previous run installed DXVK. Undo it properly, otherwise the launcher
+  # keeps selecting the DXVK backend and loads half-removed DLLs.
+  SYS32="$WINEPREFIX/drive_c/windows/system32"
+  for dll in d3d11 dxgi d3d10core d3d9; do
+    rm -f "$SYS32/${dll}.dll"
+    wine reg add 'HKCU\Software\Wine\DllOverrides' /v "$dll" /d builtin /f >/dev/null 2>&1 || true
+  done
+  rm -f "$WINEPREFIX/.dxvk-installed"
+  wineboot -u >/dev/null 2>&1 || true
+  ok "removed the previous DXVK install -- back on WineD3D"
 fi
 
 cat > "$APP_HOME/dxvk.conf" <<'DXVKCONF'
