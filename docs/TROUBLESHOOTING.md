@@ -659,3 +659,46 @@ the CPU from the game with `WINE_CPU_TOPOLOGY`. The symptom matches
 ours: a brief window, then the process exits with no error. Worth a
 run with `WINE_CPU_TOPOLOGY=4:0,1,2,3` and without
 `-USEALLAVAILABLECORES`.
+
+## The decisive test: lavapipe (CPU Vulkan)
+
+Everything so far has gone through Venus, ChromeOS's Vulkan passthrough.
+Venus has never been ruled in or out. Mesa ships `lavapipe`, a complete
+CPU-only Vulkan driver, as an ordinary ICD in `mesa-vulkan-drivers`, so
+the whole stack can be run with Venus removed from it:
+
+    LVP=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+    VK_ICD_FILENAMES="$LVP" HN_VK_WSI_SW=0 hello-neighbor-launch
+
+DXVK skips CPU adapters only while a GPU adapter is also visible; naming
+lavapipe's ICD explicitly leaves no GPU adapter, so DXVK uses it. It is
+extremely slow, which does not matter -- the question is only whether the
+process survives past the ~15 second mark where it always dies.
+
+  * Survives  -> Venus is the fault. Mesa 25.0.7 (bookworm-backports)
+    predates the Venus WSI fixes in 25.2, and the fix is a newer Mesa,
+    which on Crostini means a newer container.
+  * Dies the same way -> Venus is innocent, and the fault is in Wine,
+    DXVK or the game. Next lever is WINE_CPU_TOPOLOGY.
+
+## Wine's Wayland driver: also a known-bad path
+
+Switching to winewayland.drv changed the failure (rc=5 access violation
+-> rc=3 `CreateSwapChain` `DXGI_ERROR_INVALID_CALL`) but did not fix it,
+and it is a documented problem area. winewayland.drv puts two Wayland
+roles on one surface, which the protocol forbids; permissive drivers
+tolerate it and strict ones reject the swapchain. A separate report has
+winewayland producing a compositor protocol error, then
+`VK_ERROR_SURFACE_LOST_KHR`, then an access violation inside
+winevulkan -- the same shape as our failure.
+
+Note the DXVK log for the Wayland run contained no swapchain error at
+all, only `readMonitorEdidFromKey: Failed to get EDID reg key size`.
+DXVK logs its real reason before returning `DXGI_ERROR_INVALID_CALL`,
+so the absence of a message means DXVK rejected the call before it ever
+tried, i.e. on its arguments.
+
+Revert with:
+
+    WINEPREFIX=~/.local/share/hello-neighbor/prefix \
+      wine reg delete 'HKCU\Software\Wine\Drivers' /v Graphics /f
