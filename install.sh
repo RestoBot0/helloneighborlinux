@@ -35,6 +35,7 @@ ARCHIVE_PATH=""
 EXTRACTED_DIR=""
 RES="1280x720"
 USE_WINEHQ=0
+WINE_UPGRADED=0
 DO_DEPS=1
 DO_DXVK=1
 KEEP_ARCHIVE=0
@@ -134,20 +135,49 @@ if [ "$DO_DEPS" = "1" ]; then
   sudo apt-get install -y -qq "${PKGS[@]}" 2>/dev/null || warn "some optional packages were unavailable"
   ok "archive + desktop tooling installed"
 
-  if ! have wine && ! have wine64; then
-    if [ "$USE_WINEHQ" = "1" ]; then
-      ok "adding the WineHQ repository"
-      CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
-      sudo mkdir -p /etc/apt/keyrings
-      sudo curl -fsSL -o /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
-      sudo curl -fsSL -o /etc/apt/sources.list.d/winehq-"$CODENAME".sources \
-        "https://dl.winehq.org/wine-builds/debian/dists/$CODENAME/winehq-$CODENAME.sources"
-      sudo apt-get update -qq
-      sudo apt-get install -y --install-recommends winehq-staging \
-        || { warn "WineHQ failed, falling back to Debian's wine"; sudo apt-get install -y -qq wine wine64; }
-    else
-      sudo apt-get install -y -qq wine wine64 || die "Could not install Wine"
+  # --winehq must run even when Wine is ALREADY installed -- upgrading an
+  # existing Wine 8 is the entire point of the flag. The old condition only
+  # fired when no wine binary existed at all, so --winehq silently did
+  # nothing on this machine.
+  if [ "$USE_WINEHQ" = "1" ]; then
+    WINE_BEFORE="$(wine --version 2>/dev/null || echo none)"
+    ok "adding the WineHQ repository (current: $WINE_BEFORE)"
+    CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
+
+    # WineHQ builds are multi-arch: without i386 the 64-bit package will not
+    # resolve its dependencies.
+    sudo dpkg --add-architecture i386
+    sudo mkdir -p /etc/apt/keyrings
+    sudo curl -fsSL -o /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key \
+      || die "could not download the WineHQ signing key -- are you online?"
+    sudo curl -fsSL -o "/etc/apt/sources.list.d/winehq-$CODENAME.sources" \
+      "https://dl.winehq.org/wine-builds/debian/dists/$CODENAME/winehq-$CODENAME.sources" \
+      || die "could not download the WineHQ source list for $CODENAME"
+    sudo apt-get update -qq || warn "apt update had warnings; continuing"
+
+    # Debian's wine-stable conflicts with WineHQ's packages. Remove it first
+    # or apt will refuse the install.
+    if dpkg -l 2>/dev/null | grep -qE '^ii\s+wine(-stable)?\s'; then
+      ok "removing Debian's wine packages first (they conflict with WineHQ)"
+      sudo apt-get remove -y -qq wine wine64 wine32 wine-stable wine-stable-amd64 wine-stable-i386 >/dev/null 2>&1 || true
     fi
+
+    echo "    downloading Wine (this is a few hundred MB, give it a few minutes)..."
+    if sudo apt-get install -y --install-recommends winehq-staging; then
+      hash -r 2>/dev/null || true
+      WINE_AFTER="$(wine --version 2>/dev/null || echo unknown)"
+      if [ "$WINE_AFTER" = "$WINE_BEFORE" ]; then
+        warn "wine still reports $WINE_AFTER -- the upgrade did not take effect"
+      else
+        ok "wine upgraded: $WINE_BEFORE -> $WINE_AFTER"
+        WINE_UPGRADED=1
+      fi
+    else
+      warn "WineHQ install failed -- keeping the existing Wine"
+      sudo apt-get install -y -qq wine wine64 >/dev/null 2>&1 || true
+    fi
+  elif ! have wine && ! have wine64; then
+    sudo apt-get install -y -qq wine wine64 || die "Could not install Wine"
   fi
   ok "wine: $(wine --version 2>/dev/null || echo 'installed')"
 else
@@ -299,6 +329,13 @@ if [ ! -d "$WINEPREFIX/drive_c" ]; then
   echo "    bootstrapping (ignore any mono/gecko prompts -- they're suppressed)..."
   wineboot -u >/dev/null 2>&1 || true
   wineserver -w 2>/dev/null || true
+elif [ "$WINE_UPGRADED" = "1" ]; then
+  # The prefix was built by the previous Wine. Its bundled DLLs and registry
+  # need updating to match the new one, or the game loads a mix of both.
+  echo "    updating the existing prefix for the new Wine version..."
+  wineboot -u >/dev/null 2>&1 || true
+  wineserver -w 2>/dev/null || true
+  ok "prefix updated"
 fi
 ok "prefix ready: $WINEPREFIX"
 
@@ -447,7 +484,10 @@ ok "dxvk.conf written"
 # ===========================================================================
 step "Applying the optimised UE4 configuration"
 # ===========================================================================
-WINUSER="$(ls "$WINEPREFIX/drive_c/users" 2>/dev/null | grep -v -e '^Public$' -e '^crossover$' | head -1)"
+# pipefail is on: if the prefix has no users directory, grep finds nothing,
+# returns 1, and the whole installer aborts here with an opaque line number
+# instead of falling back to $USER. Swallow it.
+WINUSER="$(ls "$WINEPREFIX/drive_c/users" 2>/dev/null | grep -v -e '^Public$' -e '^crossover$' | head -1 || true)"
 WINUSER="${WINUSER:-$USER}"
 CFG_DST="$WINEPREFIX/drive_c/users/$WINUSER/AppData/Local/HelloNeighbor/Saved/Config/WindowsNoEditor"
 mkdir -p "$CFG_DST"
