@@ -461,6 +461,21 @@ if grep -q "GL_RGBA8_SNORM" "$LOG_FILE" 2>/dev/null; then
     log "  Install the Vulkan driver: ./tools/enable-vulkan.sh"
 fi
 
+# A Steam build calling SteamAPI_Init() outside Steam. The call fails, the
+# game carries on with an interface it never got, and dies shortly after
+# with 0xC0000005 -> rc=5. Config/Engine.ini turns the Steam online
+# subsystem off to avoid this; say so if it is still happening.
+if grep -q 'S_API FAIL' "$LOG_FILE" 2>/dev/null; then
+    log "DIAGNOSIS: the game tried to reach Steam and Steam was not there."
+    log "  SteamAPI_Init() failed and the game crashed a few seconds later."
+    log "  The Steam online subsystem should be disabled in Engine.ini:"
+    log "    [OnlineSubsystemSteam]"
+    log "    bEnabled=false"
+    log "  Engine.ini lives under the prefix at:"
+    log "    .../drive_c/users/*/AppData/Local/HelloNeighbor/Saved/Config/WindowsNoEditor/"
+    log "  Reinstall to restore it, or see docs/TROUBLESHOOTING.md."
+fi
+
 # UE4 writes its log deep inside the Wine prefix. Copy the newest one next
 # to ours so there is a single place to look.
 UE4_LOG="$(find "$WINEPREFIX/drive_c/users" -path '*HelloNeighbor/Saved/Logs/*' \

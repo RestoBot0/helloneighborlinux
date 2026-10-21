@@ -86,6 +86,7 @@ classify() { # classify <logfile>
   grep -q 'GL_RGBA8_SNORM'                       "$f" 2>/dev/null && { echo "WineD3D path (no Vulkan)";            return; }
   grep -qi 'No adapters found'                   "$f" 2>/dev/null && { echo "DXVK found no adapter";               return; }
   grep -qi 'LowLevelFatalError'                  "$f" 2>/dev/null && { echo "UE4 fatal error";                     return; }
+  grep -q  'S_API FAIL'                          "$f" 2>/dev/null && { echo "Steam API init failed";               return; }
   grep -qi 'out of memory\|VK_ERROR_OUT_OF'      "$f" 2>/dev/null && { echo "out of memory";                       return; }
   grep -qi 'Unhandled exception\|page fault'     "$f" 2>/dev/null && { echo "unhandled exception";                 return; }
   grep -qi 'DeviceLost\|VK_ERROR_DEVICE_LOST'    "$f" 2>/dev/null && { echo "GPU device lost";                     return; }

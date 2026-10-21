@@ -87,6 +87,18 @@ unimp="$(grep -aE 'unimplemented function|stub' "$OUT" 2>/dev/null | sort -u | h
 if [ -n "$unimp" ]; then printf '%s%s%s\n' "$Y" "$unimp" "$N"
 else printf '%snone%s\n' "$G" "$N"; fi
 
+# --- 2b. did it try to reach Steam? -----------------------------------------
+section "Steam"
+st="$(grep -a 'S_API\|steamclient\|SteamAPI_Init' "$OUT" 2>/dev/null | sort -u | head -5)"
+if [ -n "$st" ]; then
+  printf '%s%s%s\n' "$R" "$st" "$N"
+  printf '\nThis is a Steam build calling into Steam while Steam is not running.\n'
+  printf 'It does not handle the failure and crashes a few seconds later.\n'
+  printf 'Engine.ini should carry [OnlineSubsystemSteam] bEnabled=false.\n'
+else
+  printf '%sno Steam calls recorded%s\n' "$G" "$N"
+fi
+
 # --- 3. the exception itself ------------------------------------------------
 # 0xe06d7363 is a normal C++ throw and 0x406d1388 is a thread-name marker;
 # both are routine and would drown out the real one.
