@@ -54,6 +54,8 @@ ENABLE_CONSOLE=1
 EXTRA_GAME_ARGS=""
 # shellcheck disable=SC1090
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
+# conf may override where the game lives, so re-resolve after sourcing it
+[ -n "${HN_GAME_DIR:-}" ] && GAME_DIR="$HN_GAME_DIR"
 
 # ---------------------------------------------------------------------------
 # args
@@ -119,11 +121,11 @@ if [ -n "${HN_GAME_EXE:-}" ] && [ -f "$HN_GAME_EXE" ]; then
 else
     # prefer the real shipping binary over the launcher stub -- the stub
     # re-launches and detaches, which breaks process tracking under Wine.
-    GAME_EXE="$(find "$GAME_DIR" -maxdepth 6 -type f \
+    GAME_EXE="$(find -L "$GAME_DIR" -maxdepth 6 -type f \
         -iname 'HelloNeighbor-Win64-Shipping.exe' 2>/dev/null | head -1)"
-    [ -z "$GAME_EXE" ] && GAME_EXE="$(find "$GAME_DIR" -maxdepth 6 -type f \
+    [ -z "$GAME_EXE" ] && GAME_EXE="$(find -L "$GAME_DIR" -maxdepth 6 -type f \
         -iname 'HelloNeighbor-Win32-Shipping.exe' 2>/dev/null | head -1)"
-    [ -z "$GAME_EXE" ] && GAME_EXE="$(find "$GAME_DIR" -maxdepth 3 -type f \
+    [ -z "$GAME_EXE" ] && GAME_EXE="$(find -L "$GAME_DIR" -maxdepth 3 -type f \
         -iname 'HelloNeighbor.exe' 2>/dev/null | head -1)"
 fi
 [ -n "$GAME_EXE" ] && [ -f "$GAME_EXE" ] || die "Could not find HelloNeighbor executable under $GAME_DIR"

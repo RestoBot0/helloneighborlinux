@@ -38,6 +38,7 @@ USE_WINEHQ=0
 DO_DEPS=1
 DO_DXVK=1
 KEEP_ARCHIVE=0
+COPY_GAME=0        # with --game-dir, use the files in place; --copy duplicates
 
 # --- pretty output ---------------------------------------------------------
 if [ -t 1 ]; then
@@ -60,6 +61,8 @@ while [ $# -gt 0 ]; do
     --no-deps)      DO_DEPS=0 ;;
     --no-dxvk)      DO_DXVK=0 ;;
     --keep-archive) KEEP_ARCHIVE=1 ;;
+    --copy)         COPY_GAME=1 ;;
+    --in-place)     COPY_GAME=0 ;;
     -h|--help)      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option: $1  (try --help)" ;;
   esac
@@ -240,22 +243,39 @@ fi
 UE_VER="$(find "$GAME_ROOT" -maxdepth 4 -iname '*.version' -o -maxdepth 4 -iname 'build.version' 2>/dev/null | head -1)"
 [ -n "$UE_VER" ] && ok "version file: $(basename "$UE_VER")"
 
-# move/copy into place
+# --- put the game where the launcher expects it ----------------------------
+# Three cases:
+#   * we extracted it ourselves  -> move out of staging (instant, same fs)
+#   * --game-dir, default        -> use IN PLACE, no copy. A 5 GB game does
+#                                   not need duplicating just to add a
+#                                   launcher; a symlink is enough.
+#   * --game-dir --copy          -> duplicate it (needs 2x the disk)
 mkdir -p "$APP_HOME"
-if [ "$GAME_ROOT" != "$GAME_DIR" ]; then
+if [ "$GAME_ROOT" = "$GAME_DIR" ]; then
+  : # already in place
+elif [ -n "${STAGE:-}" ] && [[ "$GAME_ROOT" == "$STAGE"* ]]; then
   rm -rf "$GAME_DIR"
-  if [ -n "${STAGE:-}" ] && [[ "$GAME_ROOT" == "$STAGE"* ]]; then
-    mv "$GAME_ROOT" "$GAME_DIR"          # same filesystem: instant
-    rm -rf "$STAGE"
-  else
-    echo "    copying game files into $GAME_DIR ..."
-    cp -a "$GAME_ROOT" "$GAME_DIR"
+  mv "$GAME_ROOT" "$GAME_DIR"            # same filesystem: instant
+  rm -rf "$STAGE"
+elif [ "$COPY_GAME" = "1" ]; then
+  NEED_KB=$(du -sk "$GAME_ROOT" | cut -f1)
+  FREE_KB=$(df -Pk "$APP_HOME" | tail -1 | awk '{print $4}')
+  if [ "$FREE_KB" -lt "$NEED_KB" ]; then
+    die "--copy needs $((NEED_KB/1024/1024)) GB but only $((FREE_KB/1024/1024)) GB is free. Drop --copy to use the files in place."
   fi
+  rm -rf "$GAME_DIR"
+  echo "    copying game files into $GAME_DIR ..."
+  cp -a "$GAME_ROOT" "$GAME_DIR"
+else
+  # in-place: symlink so the launcher's paths stay identical either way
+  rm -rf "$GAME_DIR"
+  ln -s "$GAME_ROOT" "$GAME_DIR"
+  ok "using the game in place (no copy) -- saved $(du -sh "$GAME_ROOT" 2>/dev/null | cut -f1) of disk"
 fi
-ok "installed to $GAME_DIR ($(du -sh "$GAME_DIR" 2>/dev/null | cut -f1))"
+ok "game ready at $GAME_DIR ($(du -shL "$GAME_DIR" 2>/dev/null | cut -f1))"
 
-FINAL_EXE="$(find "$GAME_DIR" -maxdepth 7 -type f -iname 'HelloNeighbor-Win*-Shipping.exe' | head -1)"
-[ -z "$FINAL_EXE" ] && FINAL_EXE="$(find "$GAME_DIR" -maxdepth 4 -type f -iname 'HelloNeighbor.exe' | head -1)"
+FINAL_EXE="$(find -L "$GAME_DIR" -maxdepth 7 -type f -iname 'HelloNeighbor-Win*-Shipping.exe' | head -1)"
+[ -z "$FINAL_EXE" ] && FINAL_EXE="$(find -L "$GAME_DIR" -maxdepth 4 -type f -iname 'HelloNeighbor.exe' | head -1)"
 
 # ===========================================================================
 step "Creating the Wine prefix"
