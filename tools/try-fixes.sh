@@ -66,13 +66,24 @@ done
 # The first two were added to work around Wine 8 bugs. Wine is now 11.x, so
 # they are suspects for causing harm rather than helping: both change when and
 # how the Vulkan surface is created.
+# Rows 7+ hold the current line of enquiry. The crash with software
+# presentation ON faults at an address in Linux library memory (0x7f...),
+# not in the game's own image (0x140000000), and Unreal's exception handler
+# never runs, so the fault is inside the graphics driver rather than the
+# game. These rows switch off the DXVK features most likely to be hitting a
+# driver bug: graphics pipeline libraries (new, and Venus support for them
+# is young), parallel pipeline compilation, and the on-disk state cache.
 ATTEMPTS=(
-  "stock Wine 11 behaviour (no Wine 8 workarounds)|0|0|0|0"
-  "software frame presentation only|0|1|0|0"
-  "deferred surface creation only|1|0|0|0"
-  "both Wine 8 workarounds|1|1|0|0"
-  "software present + single Vulkan driver|0|1|0|1"
-  "software present + Wine virtual desktop|0|1|1|0"
+  "stock Wine 11 behaviour (no Wine 8 workarounds)|0|0|0|0|"
+  "software frame presentation only|0|1|0|0|"
+  "deferred surface creation only|1|0|0|0|"
+  "both Wine 8 workarounds|1|1|0|0|"
+  "software present + single Vulkan driver|0|1|0|1|"
+  "software present + Wine virtual desktop|0|1|1|0|"
+  "no graphics pipeline libraries|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False"
+  "no pipeline libraries, one compiler thread|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;dxvk.numCompilerThreads = 1"
+  "no pipeline libraries, no state cache|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;dxvk.enableStateCache = False"
+  "DirectX feature level 10_1|0|1|0|0|dxvk.enableGraphicsPipelineLibrary = False;d3d11.maxFeatureLevel = 10_1"
 )
 
 # Known failure signatures, most specific first.
@@ -116,12 +127,24 @@ for row in "${ATTEMPTS[@]}"; do
   i=$((i+1))
   wanted "$i" || continue
 
-  IFS='|' read -r label defer wsi vdesk oneicd <<<"$row"
+  IFS='|' read -r label defer wsi vdesk oneicd extra <<<"$row"
   printf '%s[%d/%d] %s%s\n' "$B" "$i" "${#ATTEMPTS[@]}" "$label" "$N"
 
   if [ -f "$CONF.try-backup" ]; then
     grep -v '^dxgi.deferSurfaceCreation' "$CONF.try-backup" > "$CONF"
     [ "$defer" = "1" ] && echo 'dxgi.deferSurfaceCreation = True' >> "$CONF"
+    # Apply this row's extra settings. Each key is removed from the file
+    # first: dxvk.conf already defines some of them, and appending a second
+    # copy would leave which one wins up to DXVK's parser.
+    if [ -n "${extra:-}" ]; then
+      printf '%s\n' "$extra" | tr ';' '\n' | while IFS= read -r kv; do
+        [ -n "$kv" ] || continue
+        key="${kv%%=*}"; key="$(printf '%s' "$key" | tr -d '[:space:]')"
+        grep -v "^[[:space:]]*$key[[:space:]]*=" "$CONF" > "$CONF.tmp" 2>/dev/null \
+          && mv -f "$CONF.tmp" "$CONF"
+        printf '%s\n' "$kv" >> "$CONF"
+      done
+    fi
   fi
 
   env_args=( "HN_VK_WSI_SW=$wsi" "HN_VIRTUAL_DESKTOP=$vdesk" "HN_GAME_LOG=1" "HN_DXVK_LOG=info" )
@@ -146,6 +169,7 @@ for row in "${ATTEMPTS[@]}"; do
   {
     echo "### attempt $i: $label"
     echo "### defer=$defer wsi_sw=$wsi vdesk=$vdesk single_icd=$oneicd  ran ${elapsed}s"
+    echo "### extra: ${extra:-none}"
     echo
     cat "$LOG_DIR"/launch-*.log 2>/dev/null
   } > "$saved" 2>/dev/null

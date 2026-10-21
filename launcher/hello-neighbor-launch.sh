@@ -493,7 +493,12 @@ fi
 # "CreateSwapChain ... E_FAIL" was finally identified -- so surface it here
 # rather than making anyone go and find it. Only reports newer than this
 # run's log file are considered, so an old one is never misread as current.
-if [ "$RC" != "0" ]; then
+if [ "$RC" = "0" ] && [ "$VDESK" = "1" ]; then
+    log "note: --vdesk runs the game through Wine's explorer, so the exit code"
+    log "  above is explorer's and NOT the game's. A clean 0 here does not mean"
+    log "  the game exited cleanly. Checking for a crash report regardless."
+fi
+if [ "$RC" != "0" ] || [ "$VDESK" = "1" ]; then
     for _cd in "$WINEPREFIX"/drive_c/users/*/AppData/Local/HelloNeighbor/Saved/Crashes; do
         [ -d "$_cd" ] || continue
         _xml="$(find "$_cd" -name 'CrashContext.runtime-xml' -newer "$RUN_MARKER" \
