@@ -549,7 +549,14 @@ cat > "$APP_HOME/launcher.conf" <<CONF
 RES_W=$RES_W
 RES_H=$RES_H
 FORCE_BACKEND=""     # "" (auto) | dxvk | wined3d
-WINDOWED=0
+# Windowed, deliberately. Unreal's own crash report showed this build
+# forcing exclusive fullscreen and DXGI refusing it:
+#   CreateSwapChain(...) failed at WindowsD3D11Viewport.cpp:126 with E_FAIL
+# DXVK confirmed it with "Exclusive FS: 1" and a 1920x1080 back buffer, i.e.
+# the -ResX/-ResY arguments were being ignored. A real display mode change
+# has no meaning inside Crostini. Windowed also makes the software present
+# path 2.25x cheaper at 1280x720 than at 1920x1080.
+WINDOWED=1
 ENABLE_CONSOLE=1
 EXTRA_GAME_ARGS=""
 

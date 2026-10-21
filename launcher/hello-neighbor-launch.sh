@@ -407,6 +407,11 @@ cleanup_mem() {
 }
 trap cleanup_mem EXIT INT TERM
 
+# Freeze a timestamp for "this run started now". $LOG_FILE cannot be used
+# for this: it is appended to on every log line, so by the time the crash
+# report is looked for the log is always the newer file and nothing matches.
+RUN_MARKER="$LOG_DIR/.run-marker"
+touch "$RUN_MARKER"
 log "launching..."
 set +e
 "$WINE_BIN" "${LAUNCH_PREFIX[@]}" "$GAME_EXE" "${ARGS[@]}" >>"$LOG_FILE" 2>&1
@@ -476,6 +481,30 @@ if grep -q 'S_API FAIL' "$LOG_FILE" 2>/dev/null; then
     log "  Reinstall to restore it, or see docs/TROUBLESHOOTING.md."
 fi
 
+# Unreal writes a crash report of its own even in a Shipping build, under
+# Saved/Crashes/UE4CC-*/CrashContext.runtime-xml. It names the failure far
+# better than a truncated exit code ever can -- it was how
+# "CreateSwapChain ... E_FAIL" was finally identified -- so surface it here
+# rather than making anyone go and find it. Only reports newer than this
+# run's log file are considered, so an old one is never misread as current.
+if [ "$RC" != "0" ]; then
+    for _cd in "$WINEPREFIX"/drive_c/users/*/AppData/Local/HelloNeighbor/Saved/Crashes; do
+        [ -d "$_cd" ] || continue
+        _xml="$(find "$_cd" -name 'CrashContext.runtime-xml' -newer "$RUN_MARKER" \
+                -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
+        [ -n "$_xml" ] || continue
+        log "Unreal's own crash report for this run:"
+        awk 'BEGIN { s = "<ErrorMessage>"; e = "</ErrorMessage>" }
+             !b && index($0, s) { b = 1; sub(".*" s, "") }
+             b { if (index($0, e)) { sub(e ".*", ""); if (length($0)) print; exit } print }' \
+            "$_xml" 2>/dev/null \
+          | sed -e 's/&gt;/>/g' -e 's/&lt;/</g' -e 's/&amp;/\&/g' -e '/^[[:space:]]*$/d' \
+          | head -6 | while IFS= read -r _l; do log "  $_l"; done
+        log "  full report: ./tools/read-crash.sh"
+        break
+    done
+fi
+
 # UE4 writes its log deep inside the Wine prefix. Copy the newest one next
 # to ours so there is a single place to look.
 UE4_LOG="$(find "$WINEPREFIX/drive_c/users" -path '*HelloNeighbor/Saved/Logs/*' \
@@ -485,7 +514,7 @@ if [ -n "$UE4_LOG" ] && [ -f "$UE4_LOG" ]; then
     cp -f "$UE4_LOG" "$LOG_DIR/ue4-latest.log" 2>/dev/null || true
     log "UE4's own log copied to $LOG_DIR/ue4-latest.log"
 else
-    log "no UE4 log (Shipping builds have logging compiled out) -- use the DXVK logs instead"
+    log "no UE4 log (Shipping builds compile it out) -- but Unreal does write crash reports: ./tools/read-crash.sh"
 fi
 
 command -v wineserver >/dev/null && wineserver -w 2>/dev/null || true
