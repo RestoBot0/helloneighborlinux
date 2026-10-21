@@ -582,3 +582,26 @@ It runs the game once with `+seh,+loaddll`, then prints only the parts that
 matter: failed imports, unimplemented Wine functions, the exception record
 with routine C++ throws filtered out, the faulting module, and the decoded
 exit code. `--quick` re-reads the previous trace without relaunching.
+
+### Unreal writes its own crash reports
+
+Earlier notes in this project claimed a Shipping build leaves no log. That is
+true of `Saved/Logs`, but it is **not** true of crash reports. UE4 writes a
+folder per crash under:
+
+```
+prefix/drive_c/users/<user>/AppData/Local/HelloNeighbor/Saved/Crashes/
+```
+
+Each `UE4CC-Windows-*` folder holds `CrashContext.runtime-xml` with the
+engine's own account: crash type, error message, whether it was an assert,
+the engine version, and the call stack. UE4 also copies the game log in
+there, which is the one place a Shipping build's log survives.
+
+```bash
+./tools/read-crash.sh            # newest report
+./tools/read-crash.sh --all      # every report
+```
+
+This is far better evidence than a Wine exit code, so read it first whenever
+the game dies after the engine has started.
