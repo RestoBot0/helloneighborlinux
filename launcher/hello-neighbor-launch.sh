@@ -274,7 +274,12 @@ else
     unset _wsi
     export DXVK_STATE_CACHE_PATH="$APP_HOME/cache/dxvk"
     export DXVK_LOG_PATH="$LOG_DIR"
-    export DXVK_LOG_LEVEL=none
+    # Hello Neighbor is a UE4 *Shipping* build, which has logging compiled
+    # out -- it will never write Saved/Logs. DXVK's log is therefore the only
+    # view we have of what the renderer was doing. "info" costs almost
+    # nothing and records the adapter, the features negotiated and any
+    # Vulkan error. HN_DXVK_LOG=none turns it off.
+    export DXVK_LOG_LEVEL="${HN_DXVK_LOG:-info}"
     export DXVK_CONFIG_FILE="$APP_HOME/dxvk.conf"
     mkdir -p "$DXVK_STATE_CACHE_PATH"
 fi
@@ -392,6 +397,8 @@ UE4_LOG="$(find "$WINEPREFIX/drive_c/users" -path '*HelloNeighbor/Saved/Logs/*' 
 if [ -n "$UE4_LOG" ] && [ -f "$UE4_LOG" ]; then
     cp -f "$UE4_LOG" "$LOG_DIR/ue4-latest.log" 2>/dev/null || true
     log "UE4's own log copied to $LOG_DIR/ue4-latest.log"
+else
+    log "no UE4 log (Shipping builds have logging compiled out) -- use the DXVK logs instead"
 fi
 
 command -v wineserver >/dev/null && wineserver -w 2>/dev/null || true
