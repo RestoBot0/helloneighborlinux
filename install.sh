@@ -38,6 +38,7 @@ USE_WINEHQ=0
 DO_DEPS=1
 DO_DXVK=1
 KEEP_ARCHIVE=0
+SAFE_ICON=0        # --safe-icon adds a second, troubleshooting-only launcher entry
 COPY_GAME=0        # with --game-dir, use the files in place; --copy duplicates
 # DXVK 2.x wants Vulkan 1.3 and a few features Venus can lack; 1.10.3 is the
 # compatible fallback (--dxvk-ver 1.10.3) if 2.x reports "No adapters found".
@@ -66,6 +67,7 @@ while [ $# -gt 0 ]; do
     --keep-archive) KEEP_ARCHIVE=1 ;;
     --copy)         COPY_GAME=1 ;;
     --in-place)     COPY_GAME=0 ;;
+    --safe-icon)    SAFE_ICON=1 ;;
     --dxvk-ver)     shift; DXVK_VER="${1:-2.3.1}" ;;
     -h|--help)      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option: $1  (try --help)" ;;
@@ -123,7 +125,7 @@ if [ "$DO_DEPS" = "1" ]; then
   sudo dpkg --add-architecture i386 >/dev/null 2>&1 || true
   sudo apt-get update -qq || warn "apt update had warnings; continuing"
 
-  PKGS=(unar p7zip-full cabextract libnotify-bin desktop-file-utils
+  PKGS=(unar p7zip-full cabextract libnotify-bin desktop-file-utils icoutils
         mesa-utils mesa-vulkan-drivers vulkan-tools xdg-utils curl)
   sudo apt-get install -y -qq "${PKGS[@]}" 2>/dev/null || warn "some optional packages were unavailable"
   ok "archive + desktop tooling installed"
@@ -386,6 +388,20 @@ d3d11.maxFeatureLevel = 11_0
 dxvk.enableStateCache = True
 dxvk.numCompilerThreads = 2
 d3d11.cachedDynamicResources = cr
+
+# UE4 4.20 creates its swap chain while the game window is still being set
+# up. Under Crostini's X server (sommelier) the window often is not ready to
+# back a Vulkan surface at that instant, so vkCreateSwapchainKHR fails and
+# UE4 dies with:
+#   D3DRHI->GetFactory()->CreateSwapChain(...) failed ... with error E_FAIL
+# deferSurfaceCreation delays the real Vulkan surface until the first
+# Present, by which point the window exists. This is DXVK's standard
+# workaround for exactly this failure.
+dxgi.deferSurfaceCreation = True
+
+# Never let the game ask for a real display mode change: meaningless in a
+# Crostini window and another source of swap-chain failures.
+dxgi.maxFrameLatency = 1
 DXVKCONF
 ok "dxvk.conf written"
 
@@ -452,6 +468,12 @@ if [ -f "$SRC_DIR/launcher/$APP_ID.png" ]; then
   ok "icon installed at 8 sizes"
 fi
 
+# The bundled icon is a stand-in. The game's own executable carries the real
+# artwork, which looks far better in the launcher -- use it when we can.
+if [ -x "$SRC_DIR/tools/extract-icon.sh" ]; then
+  "$SRC_DIR/tools/extract-icon.sh" --game-dir "$GAME_DIR" 2>&1 | sed 's/^/  /' || true
+fi
+
 # --- .desktop --------------------------------------------------------------
 cat > "$DESKTOP_DIR/$APP_ID.desktop" <<DESKTOP
 [Desktop Entry]
@@ -491,26 +513,34 @@ chmod 0644 "$DESKTOP_DIR/$APP_ID.desktop"
 ok ".desktop -> $DESKTOP_DIR/$APP_ID.desktop"
 
 # ChromeOS's shelf/launcher does NOT surface Desktop Actions the way GNOME
-# does, so the right-click fallbacks above are invisible there. Ship Safe
-# Mode as its own launcher entry so it's actually reachable.
-cat > "$DESKTOP_DIR/$APP_ID-safe.desktop" <<DESKTOPSAFE
+# does, so the right-click fallbacks above are invisible there. Safe Mode
+# therefore has to be its own launcher entry -- but two near-identical
+# "Hello Neighbor" icons in the launcher is confusing, so it is opt-in.
+# Safe Mode forces the OpenGL/WineD3D path, which crashes this UE4 build
+# outright, so it is only worth having while debugging.
+if [ "$SAFE_ICON" = "1" ]; then
+  cat > "$DESKTOP_DIR/$APP_ID-safe.desktop" <<DESKTOPSAFE
 [Desktop Entry]
 Type=Application
 Version=1.0
 Name=Hello Neighbor (Safe Mode)
 GenericName=Stealth Horror Game
-Comment=Maximum-compatibility mode: windowed, 1024x576, OpenGL. Use if the normal icon won't start.
-Exec=$BIN_DIR/hello-neighbor-launch --safe
+Comment=Hello Neighbor in a small window on the OpenGL path, for troubleshooting
+Exec=$BIN_DIR/hello-neighbor-launch --safe --windowed
 Icon=$APP_ID
 Terminal=false
 Categories=Game;ActionGame;AdventureGame;
-Keywords=hello;neighbor;safe;compatibility;troubleshoot;
+Keywords=hello;neighbor;safe;troubleshoot;
 StartupNotify=true
 StartupWMClass=helloneighbor-win64-shipping.exe
 NoDisplay=false
 DESKTOPSAFE
-chmod 0644 "$DESKTOP_DIR/$APP_ID-safe.desktop"
-ok ".desktop (safe mode) -> $DESKTOP_DIR/$APP_ID-safe.desktop"
+  chmod 0644 "$DESKTOP_DIR/$APP_ID-safe.desktop"
+  ok ".desktop (safe mode) -> $DESKTOP_DIR/$APP_ID-safe.desktop"
+elif [ -f "$DESKTOP_DIR/$APP_ID-safe.desktop" ]; then
+  rm -f "$DESKTOP_DIR/$APP_ID-safe.desktop"
+  ok "removed the duplicate Safe Mode icon (re-add with --safe-icon)"
+fi
 
 if have desktop-file-validate; then
   desktop-file-validate "$DESKTOP_DIR/$APP_ID.desktop" && ok ".desktop validates clean" \
@@ -532,6 +562,17 @@ if [ -z "$EXTRACTED_DIR" ] && [ "$KEEP_ARCHIVE" = "0" ] && [ -n "$ARCHIVE_PATH" 
   case "$yn" in [Yy]*) rm -f "$ARCHIVE_PATH"; ok "archive deleted" ;; *) ok "archive kept" ;; esac
 fi
 
+if [ "$SAFE_ICON" = "1" ]; then
+  SAFE_ICON_NOTE="  A second icon, ${B}Hello Neighbor (Safe Mode)${N}, is installed for
+  troubleshooting. It forces the OpenGL path, which this build crashes on,
+  so it is only useful for comparison. Remove it by re-running without
+  --safe-icon."
+else
+  SAFE_ICON_NOTE="  Only one icon is installed. If the game will not start, see
+  ${C}$APP_HOME/logs/${N} -- the launcher writes a plain-English diagnosis
+  there when it recognises the failure."
+fi
+
 cat <<DONE
 
 ${G}${B}  Done.${N}
@@ -540,10 +581,7 @@ ${G}${B}  Done.${N}
   Everything key, type "Hello", and it's there. Right-click it and pick
   ${B}Pin to shelf${N} and you never have to open a terminal again.
 
-  There is a second icon, ${B}Hello Neighbor (Safe Mode)${N}, for when the normal
-  one misbehaves: smaller window, OpenGL instead of Vulkan. ChromeOS does
-  not show the right-click "Desktop Actions" that other Linux desktops do,
-  so Safe Mode ships as its own icon rather than a menu item.
+${SAFE_ICON_NOTE}
 
   First launch compiles shaders, so it will be slower and may sit on a
   black screen for up to a minute. That is normal and happens once.

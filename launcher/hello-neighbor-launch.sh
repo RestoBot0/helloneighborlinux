@@ -16,6 +16,7 @@
 #   --vk           force DXVK even if detection says otherwise
 #   --res WxH      override resolution, e.g. --res 1600x900
 #   --console      start with the UE4 developer console enabled
+#   --vdesk        run inside a Wine virtual desktop (fixes CreateSwapChain)
 #   --kill         terminate a running game + its wine prefix
 #   --debug        verbose wine logging (slow, for troubleshooting only)
 # ---------------------------------------------------------------------------
@@ -32,6 +33,10 @@ CONF_FILE="$APP_HOME/launcher.conf"
 
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/launch-$(date +%Y%m%d-%H%M%S).log"
+# Stable name so "read the log" is always the same command, however many
+# timestamped runs have piled up.
+LATEST_LINK="$LOG_DIR/latest.log"
+ln -sfn "$(basename "$LOG_FILE")" "$LATEST_LINK" 2>/dev/null || true
 
 # keep only the 10 most recent logs
 ls -1t "$LOG_DIR"/launch-*.log 2>/dev/null | tail -n +11 | xargs -r rm -f
@@ -49,6 +54,12 @@ notify() {
 RES_W=1280
 RES_H=720
 FORCE_BACKEND=""      # "" | dxvk | wined3d
+# Wine virtual desktop. Crostini's X server (sommelier) manages windows
+# differently from a normal desktop, and UE4 sometimes cannot get a Vulkan
+# surface for the window it just made -- CreateSwapChain then fails with
+# E_FAIL. Running inside "wine explorer /desktop=..." gives Wine one real
+# top-level X window that it owns outright, which sidesteps that.
+VDESK="${HN_VIRTUAL_DESKTOP:-0}"
 WINDOWED=0
 ENABLE_CONSOLE=1
 USE_SM4=0          # UE4 shipping builds rarely cook SM4 shaders
@@ -68,6 +79,8 @@ while [ $# -gt 0 ]; do
         --safe)     FORCE_BACKEND="wined3d"; SAFE_MODE=1; WINDOWED=1; RES_W=1024; RES_H=576 ;;
         --sm4)      USE_SM4=1 ;;
         --gl)       FORCE_BACKEND="wined3d" ;;
+        --vdesk)    VDESK=1 ;;
+        --no-vdesk) VDESK=0 ;;
         --vk)       FORCE_BACKEND="dxvk" ;;
         --console)  ENABLE_CONSOLE=1 ;;
         --debug)    DEBUG=1 ;;
@@ -225,12 +238,15 @@ else
     # first present. MESA_VK_WSI_DEBUG=sw moves ONLY the final "copy the
     # finished frame to the window" step onto the CPU. All rendering stays on
     # the GPU, so the cost is a few percent, not a fallback to software.
-    # Set HN_VK_WSI_SW=0 in launcher.conf to try the native path.
-    if [ "${HN_VK_WSI_SW:-auto}" != "0" ]; then
-        if [ "${HN_VK_WSI_SW:-auto}" = "1" ] || [ -e /dev/wl0 ]; then
-            export MESA_VK_WSI_DEBUG=sw
-            log "Venus WSI workaround active (MESA_VK_WSI_DEBUG=sw)"
-        fi
+    # Set HN_VK_WSI_SW=1 in launcher.conf to enable it.
+    # Default OFF. Forcing the software present path changes which surface
+    # capabilities Venus advertises, and that can itself make
+    # vkCreateSwapchainKHR fail -- which surfaces as UE4's
+    # "CreateSwapChain ... E_FAIL". Only turn it on if the game renders but
+    # tears or freezes on presentation.
+    if [ "${HN_VK_WSI_SW:-0}" = "1" ]; then
+        export MESA_VK_WSI_DEBUG=sw
+        log "Venus WSI workaround active (MESA_VK_WSI_DEBUG=sw)"
     fi
     export DXVK_STATE_CACHE_PATH="$APP_HOME/cache/dxvk"
     export DXVK_LOG_PATH="$LOG_DIR"
@@ -297,9 +313,15 @@ fi
 notify "$APP_NAME" "Starting..."
 cd "$GAME_EXE_DIR" || die "cannot cd to $GAME_EXE_DIR"
 
+LAUNCH_PREFIX=()
+if [ "$VDESK" = "1" ]; then
+    LAUNCH_PREFIX=(explorer "/desktop=HelloNeighbor,${RES_W}x${RES_H}")
+    log "virtual desktop: ${RES_W}x${RES_H}"
+fi
+
 log "launching..."
 set +e
-"$WINE_BIN" "$GAME_EXE" "${ARGS[@]}" >>"$LOG_FILE" 2>&1
+"$WINE_BIN" "${LAUNCH_PREFIX[@]}" "$GAME_EXE" "${ARGS[@]}" >>"$LOG_FILE" 2>&1
 RC=$?
 set -e
 log "game exited rc=$RC"
@@ -308,6 +330,20 @@ log "game exited rc=$RC"
 # died almost immediately, which is the signature of a real failure.
 if [ $RC -ne 0 ]; then
     log "non-zero exit -- see $LOG_FILE"
+fi
+
+# Turn the two failures we have actually hit into plain-English advice rather
+# than leaving the user to read a UE4 fatal-error dump.
+if grep -q "CreateSwapChain" "$LOG_FILE" 2>/dev/null; then
+    log "DIAGNOSIS: the game could not create its display surface."
+    log "  Try, in order:"
+    log "    1. $0 --vdesk            (run inside a Wine virtual desktop)"
+    log "    2. $0 --vdesk --windowed"
+    log "    3. set HN_VK_WSI_SW=1 in $APP_HOME/launcher.conf"
+fi
+if grep -q "GL_RGBA8_SNORM" "$LOG_FILE" 2>/dev/null; then
+    log "DIAGNOSIS: running on WineD3D, which cannot render this game."
+    log "  Install the Vulkan driver: ./tools/enable-vulkan.sh"
 fi
 
 command -v wineserver >/dev/null && wineserver -w 2>/dev/null || true
