@@ -76,16 +76,30 @@ if [ "$GAME_PAKS" -gt 0 ]; then
   printf '%sCooked and packaged.%s Content is in Content/Paks, which is what a\n' "$G" "$N"
   printf 'retail build normally looks like.\n'
 elif [ "$N_UEXP" -gt 0 ]; then
-  printf '%sCooked, stored as loose files.%s Unusual but valid: the assets are\n' "$G" "$N"
-  printf 'cooked (%s .uexp files) and simply were not packed into a .pak.\n' "$N_UEXP"
-  printf 'A Shipping build can load this.\n'
+  printf '%sCooked, stored as loose files.%s The assets are cooked (%s .uexp\n' "$G" "$N" "$N_UEXP"
+  printf 'files) and simply were not packed. A Shipping build loads this.\n'
 elif [ "$N_UASSET" -gt 0 ]; then
-  printf '%sUNCOOKED EDITOR CONTENT.%s %s .uasset files and not a single .uexp.\n' "$R" "$N" "$N_UASSET"
-  printf '\nThis is raw project content, the kind the Unreal Editor works with.\n'
-  printf 'HelloNeighbor-Win64-Shipping.exe cannot load it. It will initialise,\n'
-  printf 'render its logo, and then die when it tries to open a level -- which\n'
-  printf 'is exactly the crash being chased.\n'
-  note_problem
+  # No .uexp is NOT proof of uncooked content. The .uasset/.uexp split comes
+  # from the Event Driven Loader; cook with it off and you get cooked
+  # single-file .uasset instead, as shipped UE4 titles have done. So fall
+  # back to markers only a cook produces: AssetRegistry.bin and the global
+  # shader cache. Hello Neighbor in particular ships loose with no
+  # Content/Paks -- its own modding guides tell people to create that folder.
+  COOKMARK=0
+  find -L "$GAME_DIR" -type f -iname 'AssetRegistry.bin'      -print -quit 2>/dev/null | grep -q . && COOKMARK=$((COOKMARK+1))
+  find -L "$GAME_DIR" -type f -iname 'GlobalShaderCache*.bin' -print -quit 2>/dev/null | grep -q . && COOKMARK=$((COOKMARK+1))
+  if [ "$COOKMARK" -ge 2 ]; then
+    printf '%sCooked, loose, single-file assets.%s %s .uasset files and no .uexp,\n' "$G" "$N" "$N_UASSET"
+    printf 'but AssetRegistry.bin and the global shader cache are both present\n'
+    printf 'and those are produced by cooking. The .uasset/.uexp split only\n'
+    printf 'happens with the Event Driven Loader on at cook time.\n'
+    printf '\n%sThis is a normal Hello Neighbor install. Nothing to fix here.%s\n' "$G" "$N"
+  else
+    printf '%sPossibly uncooked editor content.%s %s .uasset files, no .uexp, and\n' "$R" "$N" "$N_UASSET"
+    printf 'neither AssetRegistry.bin nor a global shader cache, both of which\n'
+    printf 'cooking produces. A Shipping build cannot load raw editor content.\n'
+    note_problem
+  fi
 else
   printf '%sNo Unreal content found at all.%s\n' "$R" "$N"
   note_problem
@@ -95,9 +109,10 @@ fi
 # project tree rather than a packaged game.
 EDITORDIRS="$(find -L "$GAME_DIR/Engine/Content" -maxdepth 1 -type d -iname 'Editor*' 2>/dev/null | wc -l)"
 if [ "$EDITORDIRS" -gt 0 ]; then
-  printf '\n%sEngine/Content holds %s Editor* folders.%s A packaged game has none;\n' \
+  printf '\n%sNote: Engine/Content holds %s Editor* folders.%s Cooking strips editor\n' \
     "$Y" "$EDITORDIRS" "$N"
-  printf 'cooking strips editor-only content out.\n'
+  printf 'content only when "Exclude editor content when cooking" is enabled,\n'
+  printf 'which many 2017-era titles left off. On its own this is not a fault.\n'
 fi
 
 # --- truncation -------------------------------------------------------------
