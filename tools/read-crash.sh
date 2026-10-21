@@ -70,7 +70,37 @@ for d in "${DIRS[@]}"; do
   printf '  %s%-2s%s %s  %s\n' "$B" "$i" "$N" \
     "$(date -r "$d" '+%Y-%m-%d %H:%M' 2>/dev/null)" "$(basename "$d")"
 done
-printf '\n%sNewest first. The top one is the run you just did.%s\n' "$Y" "$N"
+
+# A crash report is only evidence about the run that produced it. The launch
+# log filename carries the start time of the last run, so we can say plainly
+# whether the newest report belongs to it -- otherwise it is far too easy to
+# read an old report and "fix" a configuration that is no longer in use.
+last_run_start() {
+  local f base ts
+  f="$(ls -t "$APP_HOME"/logs/launch-*.log 2>/dev/null | head -1)"
+  [ -n "$f" ] || return 1
+  base="$(basename "$f" .log)"; ts="${base#launch-}"
+  date -d "${ts:0:4}-${ts:4:2}-${ts:6:2} ${ts:9:2}:${ts:11:2}:${ts:13:2}" +%s 2>/dev/null
+}
+RUN_START="$(last_run_start || true)"
+NEWEST_CRASH="$(date -r "${DIRS[0]}" +%s 2>/dev/null || echo 0)"
+printf '\n'
+if [ -n "$RUN_START" ] && [ "$NEWEST_CRASH" -lt "$RUN_START" ] 2>/dev/null; then
+  printf '%sThe most recent run produced NO crash report.%s\n' "$R" "$N"
+  printf 'Last run started %s; newest report is from %s.\n' \
+    "$(date -d "@$RUN_START" '+%H:%M' 2>/dev/null)" \
+    "$(date -d "@$NEWEST_CRASH" '+%H:%M' 2>/dev/null)"
+  printf '\n%sThat is a finding, not a gap.%s Unreal writes a report from its own\n' "$Y" "$N"
+  printf 'exception handler. If no report appears, the handler never ran, which\n'
+  printf 'means the fault happened somewhere it could not reach -- typically in\n'
+  printf 'Linux-side code called underneath Wine, such as the Vulkan driver.\n'
+  printf 'Wine says as much when it prints "Exception frame is not in stack\n'
+  printf 'limits => unable to dispatch exception".\n'
+  printf '\n%sThe report below is from an OLDER run and may describe a%s\n' "$Y" "$N"
+  printf '%sconfiguration you are no longer using.%s\n' "$Y" "$N"
+else
+  printf '%sNewest first. The top one is the run you just did.%s\n' "$G" "$N"
+fi
 
 show_one() { # show_one <dir>
   local d="$1" xml
