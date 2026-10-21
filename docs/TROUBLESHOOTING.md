@@ -349,3 +349,60 @@ hit it, drop to the 1.x series:
 
 To go back to OpenGL entirely, re-run with `--no-dxvk` — the installer will
 properly uninstall the DXVK DLLs and restore Wine's builtins.
+
+---
+
+## `Assertion failed! dlls/winevulkan/loader_thunks.c ... Expression: !status`
+
+**Symptom.** A Wine dialog appears before the game draws anything:
+
+```
+Assertion failed!
+File: dlls/winevulkan/loader_thunks.c
+Line: 4850
+Expression: "!status"
+```
+
+**Cause.** Nothing is wrong with your GPU, driver or the game. `winevulkan`
+is Wine's bridge between the Windows-side Vulkan API and the real Linux
+driver, and it is built from generated *thunks* — one small forwarding
+function per Vulkan entry point, fixed at the time that Wine was compiled.
+
+When something asks for an entry point the installed Wine was never built to
+forward, the call into the Unix side fails, `status` is non-zero, and the
+assertion kills the process.
+
+Debian 12 ships **Wine 8.0 (January 2023)**. Our `enable-vulkan.sh` installs
+**Mesa 25.0.7 (2025)**, which advertises much newer extensions — including
+the surface/swapchain maintenance ones. DXVK 2.x sees them advertised and
+uses them. Wine 8.0 has never heard of them. That version gap is the whole
+bug.
+
+> This is also why `vulkaninfo` printed
+> `MESA: error: Use of VkSurfacePresentModeCompatibilityEXT ...` earlier —
+> the same new extension family.
+
+**Two fixes, either works.**
+
+*Keep Wine 8, use an older DXVK.* DXVK 1.10.x targets Vulkan 1.1 and stays
+inside what Wine 8 knows how to forward:
+
+```bash
+./install.sh --game-dir ~/'Hello Neighbor FILE FOR ARENA' --no-deps --dxvk-ver 1.10.3
+```
+
+*Or upgrade Wine* to 9/10, which implements the modern entry points:
+
+```bash
+./install.sh --game-dir ~/'Hello Neighbor FILE FOR ARENA' --winehq
+```
+
+The installer now checks `wine --version` and automatically drops to DXVK
+1.10.3 when Wine is older than 9.0, so a plain re-run picks the working
+combination on its own. Pass `--dxvk-ver` to override that choice.
+
+**Why not just stay on the old Mesa?** Because without Mesa 25 there is no
+Vulkan at all in Crostini, and without Vulkan the only path is WineD3D,
+which cannot render this game (see the `GL_RGBA8_SNORM` section above).
+Old Mesa and new DXVK are both dead ends; new Mesa with a matched
+DXVK/Wine pair is the one combination that works.

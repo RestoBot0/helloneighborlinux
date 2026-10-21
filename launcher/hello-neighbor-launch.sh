@@ -341,6 +341,12 @@ if grep -q "CreateSwapChain" "$LOG_FILE" 2>/dev/null; then
     log "    2. $0 --vdesk --windowed"
     log "    3. set HN_VK_WSI_SW=1 in $APP_HOME/launcher.conf"
 fi
+if grep -q "loader_thunks.c" "$LOG_FILE" 2>/dev/null; then
+    log "DIAGNOSIS: Wine is too old for the Vulkan driver installed."
+    log "  winevulkan was asked to forward a call it was not built to handle."
+    log "  Fix: ./install.sh --game-dir <dir> --no-deps --dxvk-ver 1.10.3"
+    log "  Or upgrade Wine:  ./install.sh --game-dir <dir> --winehq"
+fi
 if grep -q "GL_RGBA8_SNORM" "$LOG_FILE" 2>/dev/null; then
     log "DIAGNOSIS: running on WineD3D, which cannot render this game."
     log "  Install the Vulkan driver: ./tools/enable-vulkan.sh"

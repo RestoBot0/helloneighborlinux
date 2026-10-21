@@ -43,6 +43,7 @@ COPY_GAME=0        # with --game-dir, use the files in place; --copy duplicates
 # DXVK 2.x wants Vulkan 1.3 and a few features Venus can lack; 1.10.3 is the
 # compatible fallback (--dxvk-ver 1.10.3) if 2.x reports "No adapters found".
 DXVK_VER="2.3.1"
+DXVK_VER_EXPLICIT=0
 
 # --- pretty output ---------------------------------------------------------
 if [ -t 1 ]; then
@@ -68,7 +69,7 @@ while [ $# -gt 0 ]; do
     --copy)         COPY_GAME=1 ;;
     --in-place)     COPY_GAME=0 ;;
     --safe-icon)    SAFE_ICON=1 ;;
-    --dxvk-ver)     shift; DXVK_VER="${1:-2.3.1}" ;;
+    --dxvk-ver)     shift; DXVK_VER="${1:-2.3.1}"; DXVK_VER_EXPLICIT=1 ;;
     -h|--help)      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "Unknown option: $1  (try --help)" ;;
   esac
@@ -319,6 +320,28 @@ else
   warn "UE4 titles crash on WineD3D here (GL_RGBA8_SNORM buffer views)."
   warn "Run ./tools/enable-vulkan.sh to install the Venus driver, then re-run this."
   DO_DXVK=0
+fi
+
+# --- match DXVK to the Wine we have ----------------------------------------
+# DXVK 2.x drives modern Vulkan entry points. Wine's winevulkan is a
+# generated thunk layer: call something the installed Wine was not built to
+# forward and the unix call returns an error, which trips
+#   Assertion failed! File: dlls/winevulkan/loader_thunks.c  Expression: !status
+# and kills the process before the game draws anything. Debian 12 ships
+# Wine 8.0 (January 2023), which predates the surface/swapchain
+# maintenance extensions that Mesa 25 advertises and DXVK 2.x will happily
+# use. DXVK 1.10.x sticks to Vulkan 1.1 and stays inside what Wine 8 knows.
+if [ "$DO_DXVK" = "1" ]; then
+  WINE_VER_STR="$(wine --version 2>/dev/null | sed 's/^wine-//' | awk '{print $1}')"
+  WINE_MAJOR="${WINE_VER_STR%%.*}"
+  case "$WINE_MAJOR" in (*[!0-9]*|'') WINE_MAJOR=0 ;; esac
+  if [ "$WINE_MAJOR" -gt 0 ] && [ "$WINE_MAJOR" -lt 9 ] \
+     && [ "$DXVK_VER_EXPLICIT" = "0" ] && [ "${DXVK_VER%%.*}" -ge 2 ]; then
+    warn "Wine $WINE_VER_STR is older than 9.0 -- too old for DXVK ${DXVK_VER}"
+    warn "using DXVK 1.10.3 instead (override with --dxvk-ver)"
+    warn "for the newest stack instead, re-run with --winehq"
+    DXVK_VER="1.10.3"
+  fi
 fi
 
 if [ "$DO_DXVK" = "1" ]; then
