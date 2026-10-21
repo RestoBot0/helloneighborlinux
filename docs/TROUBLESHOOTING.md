@@ -1,5 +1,70 @@
 # Troubleshooting
 
+## SOLVED: "it launches, shows the tinyBuild logo, then vanishes after ~15 seconds"
+
+This was the big one. It took about fifty debugging steps and it was never a
+Linux, Wine, Vulkan or graphics problem at all.
+
+**Cause.** *Hello Neighbor* bundles an old build of OpenSSL (used by its
+online/analytics code). That OpenSSL predates **SHA-NI**, a set of CPU
+instructions Intel first shipped on **10th-generation Core** chips. On a 10th
+gen or newer CPU it detects SHA-NI, takes a code path it was never built to
+run, corrupts memory, and the process dies with `0xC0000005` *before* Unreal's
+crash handler is installed. That explains every symptom we saw:
+
+* no Unreal crash report (`rc=5`, handler never ran)
+* identical failure on **every** graphics configuration, including `lvp`
+  (lavapipe) with no GPU in the loop at all
+* `err:seh:call_seh_handlers invalid frame` — generic "this stack was
+  scribbled on", not a graphics fault
+* the widely-reported community workaround *"turn your WiFi off and it
+  launches"* — same bug, approached from the other end
+
+**Fix.** Set the environment variable `OPENSSL_ia32cap` to `:~0x20000000`.
+The leading colon selects OpenSSL's *second* capability word; `~0x20000000`
+clears bit 29 of it, the SHA-NI bit. OpenSSL then behaves as it would on a
+9th-gen chip. Nothing else changes.
+
+This is **tinyBuild's own documented fix**, from their support article
+*"[PC] The game crashes at start"*, which says it applies to *"players with
+10th Gen Intel CPUs or newer (11th, 12th, 13th, etc.)"* and warns: *"Make sure
+to include the ':' on Value and leave no gaps — formatting matters!"*
+
+**You do not have to do anything.** The launcher exports it on every run
+(Wine makes the Unix shell environment visible to the Windows process it
+starts — see `wine(1)`, ENVIRONMENT). Confirm it in the log:
+
+```
+OpenSSL CPU workaround on (OPENSSL_ia32cap=:~0x20000000)
+```
+
+To test without it: `HN_OPENSSL_FIX=0 ~/.local/share/hello-neighbor/bin/hello-neighbor-launch`
+(or `OPENSSL_FIX=0` in `launcher.conf`). The only reason to do that is to
+confirm the crash comes back.
+
+tinyBuild list two other fixes for the same crash, worth knowing if it ever
+returns: **remove all mods**, and **block the game in the firewall / go
+offline**.
+
+### Verified on the target machine
+
+| Thing we changed | Variants tried | Result |
+|---|---|---|
+| DXVK version | 2.3.1, 1.10.3 | crashed both |
+| Vulkan driver | Venus (GPU), lavapipe (CPU only) | crashed both |
+| Window system | winex11.drv, winewayland.drv | crashed both |
+| `MESA_VK_WSI_DEBUG=sw` | on, off | crashed both |
+| Wine sync | esync/fsync on, off | crashed both |
+| Audio | on, `HN_NOSOUND=1` | crashed both |
+| Window mode | windowed, virtual desktop, several resolutions | crashed all |
+| CPU topology | `WINE_CPU_TOPOLOGY=4:0,2,4,6` | crashed |
+| **`OPENSSL_ia32cap=:~0x20000000`** | — | **game runs** |
+
+Lesson for next time: search the **game's name plus the symptom** before
+spending days on the platform underneath it.
+
+---
+
 **Always start here:** right-click the shelf icon → **Open the log folder**, and
 read the newest `launch-*.log`. It records the backend chosen, the exe found, the
 full argument list and Wine's output.

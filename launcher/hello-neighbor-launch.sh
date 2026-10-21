@@ -67,6 +67,10 @@ GAME_LOG="${HN_GAME_LOG:-1}"
 # Windowed by default: this build asks for exclusive fullscreen, which has
 # no meaning in Crostini and which DXGI refuses. HN_WINDOWED overrides it.
 WINDOWED="${HN_WINDOWED:-1}"
+# tinyBuild's own documented fix for this game on 10th-gen Intel CPUs and
+# newer. On by default; HN_OPENSSL_FIX=0 turns it off. See the environment
+# section below for what it actually does.
+OPENSSL_FIX="${HN_OPENSSL_FIX:-1}"
 ENABLE_CONSOLE=1
 USE_SM4=0          # UE4 shipping builds rarely cook SM4 shaders
 EXTRA_GAME_ARGS=""
@@ -82,6 +86,7 @@ _env_wine="${HN_WINE-}"
 _env_windowed="${HN_WINDOWED-}"
 _env_sync="${HN_WINESYNC-}"
 _env_nosound="${HN_NOSOUND-}"
+_env_openssl="${HN_OPENSSL_FIX-}"
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 [ -n "$_env_wsi" ]   && HN_VK_WSI_SW="$_env_wsi"
 [ -n "$_env_vdesk" ] && VDESK="$_env_vdesk"
@@ -89,7 +94,9 @@ _env_nosound="${HN_NOSOUND-}"
 [ -n "$_env_windowed" ] && WINDOWED="$_env_windowed"
 [ -n "$_env_sync" ] && HN_WINESYNC="$_env_sync"
 [ -n "$_env_nosound" ] && HN_NOSOUND="$_env_nosound"
-unset _env_wsi _env_vdesk _env_wine _env_windowed _env_sync _env_nosound
+[ -n "$_env_openssl" ] && OPENSSL_FIX="$_env_openssl"
+# launcher.conf may set OPENSSL_FIX directly too; the env wins over it.
+unset _env_wsi _env_vdesk _env_wine _env_windowed _env_sync _env_nosound _env_openssl
 # conf may override where the game lives, so re-resolve after sourcing it
 [ -n "${HN_GAME_DIR:-}" ] && GAME_DIR="$HN_GAME_DIR"
 
@@ -254,6 +261,39 @@ log "graphics backend: $BACKEND"
 # environment
 # ---------------------------------------------------------------------------
 export WINEARCH=win64
+
+# --- the fix for THE crash --------------------------------------------------
+# This one is not a Wine problem and never was. tinyBuild publish it in their
+# own support article, "[PC] The game crashes at start":
+#
+#     "For players with 10th Gen Intel CPUs or newer (11th, 12th, 13th, etc.)"
+#     create an environment variable OPENSSL_ia32cap with the value :~0x20000000
+#     "Make sure to include the ':' on Value and leave no gaps -- formatting
+#      matters!"
+#
+# Hello Neighbor ships an old build of OpenSSL (its analytics/online code
+# talks HTTPS). That OpenSSL predates the SHA-NI instruction set, which Intel
+# first shipped on 10th-gen Core chips. It detects the CPU, sees SHA-NI, takes
+# a code path it was never built to run, and corrupts memory -- the process
+# dies with 0xC0000005 before Unreal's crash handler is even installed, which
+# is exactly why there was no crash report, and why the failure looked
+# identical on every graphics stack we tried, right down to a software
+# rasteriser with no GPU in the loop at all.
+#
+# OPENSSL_ia32cap is OpenSSL's own override for its CPU detection. The leading
+# colon selects the *second* capability word; ~0x20000000 clears bit 29 of it,
+# which is the SHA-NI bit. OpenSSL then behaves as it would on a 9th-gen chip.
+# Nothing else about the game changes.
+#
+# Wine makes the Unix shell environment visible to the Windows process it
+# starts (wine(1), "ENVIRONMENT"), so exporting it here is all it takes.
+if [ "${OPENSSL_FIX:-1}" = "1" ]; then
+    export OPENSSL_ia32cap=':~0x20000000'
+    log "OpenSSL CPU workaround on (OPENSSL_ia32cap=:~0x20000000)"
+else
+    log "OpenSSL CPU workaround OFF (HN_OPENSSL_FIX=0)"
+fi
+
 export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
 
 # Audio is the one major subsystem this project has never tested without.
@@ -541,22 +581,22 @@ fi
 # Unreal's handler ever running, so no crash report is written. This is the
 # signature of synchronisation-level corruption rather than a graphics bug.
 if grep -q 'not in stack limits\|call_seh_handlers invalid frame' "$LOG_FILE" 2>/dev/null; then
-    log "DIAGNOSIS: a worker thread's exception frame was corrupt."
-    log "  Wine could not dispatch the exception, so Unreal never got to"
-    log "  write a crash report. This is usually synchronisation, not"
-    log "  graphics. Things to rule out, in order:"
-    if [ "${HN_WINESYNC:-1}" = "1" ]; then
-        log "    HN_WINESYNC=0 $0"
-        log "      (open files this run: $(ulimit -n); esync needs a high limit)"
+    log "DIAGNOSIS: a thread's exception frame was corrupt -- memory was"
+    log "  scribbled on before Unreal's crash handler could run, so there is"
+    log "  no crash report. On this hardware that has one known cause:"
+    if [ "${OPENSSL_FIX:-1}" = "1" ]; then
+        log "    The OpenSSL CPU workaround was ON this run, so something else"
+        log "    is wrong. Next, try the game with no network at all --"
+        log "    tinyBuild list that as the other fix for this same crash:"
+        log "      turn WiFi off, then launch."
+        log "    Then capture a trace: ./tools/crash-trace.sh"
     else
-        log "    esync/fsync were already off this run, so they are not the cause"
+        log "    HN_OPENSSL_FIX=1 $0"
+        log "      tinyBuild's documented fix for 10th-gen Intel CPUs and newer."
+        log "      It is on by default; something turned it off this run."
     fi
-    if [ "${HN_NOSOUND:-0}" = "0" ]; then
-        log "    HN_NOSOUND=1 $0"
-        log "      (removes Wine's audio driver and Unreal's audio device)"
-    else
-        log "    audio was already off this run, so it is not the cause"
-    fi
+    log "  Ruled out already on this machine, do not bother: graphics driver,"
+    log "  DXVK version, X11 vs Wayland, esync/fsync, audio, CPU topology."
 fi
 
 # Unreal writes a crash report of its own even in a Shipping build, under

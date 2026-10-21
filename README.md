@@ -20,6 +20,13 @@ cd helloneighborlinux
 
 Then press the **Search/Everything** key, type `Hello`, right-click → **Pin to shelf**. Done.
 
+> **10th-gen Intel CPU or newer?** The launcher already handles it. The game
+> ships an old OpenSSL that mis-detects the SHA-NI instructions those CPUs
+> introduced and crashes about fifteen seconds in, with no crash report. The
+> launcher exports tinyBuild's documented workaround
+> (`OPENSSL_ia32cap=:~0x20000000`) on every run. Full write-up:
+> [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
 ---
 
 ## Important: the archive stays on your Chromebook

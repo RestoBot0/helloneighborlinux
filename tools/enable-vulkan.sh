@@ -89,8 +89,9 @@ fi
 
 # ---------------------------------------------------------------------------
 hdr "GPU device permissions"
-if ! id -nG "$USER" | tr ' ' '\n' | grep -qx render; then
-  sudo usermod -aG render "$USER" && ok "added $USER to the 'render' group"
+_me="${USER:-$(id -un)}"
+if ! id -nG "$_me" | tr ' ' '\n' | grep -qx render; then
+  sudo usermod -aG render "$_me" && ok "added $_me to the 'render' group"
   NEED_RESTART=1
 else
   ok "already in the 'render' group"

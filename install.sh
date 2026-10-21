@@ -495,7 +495,7 @@ step "Applying the optimised UE4 configuration"
 # returns 1, and the whole installer aborts here with an opaque line number
 # instead of falling back to $USER. Swallow it.
 WINUSER="$(ls "$WINEPREFIX/drive_c/users" 2>/dev/null | grep -v -e '^Public$' -e '^crossover$' | head -1 || true)"
-WINUSER="${WINUSER:-$USER}"
+WINUSER="${WINUSER:-${USER:-$(id -un)}}"
 CFG_DST="$WINEPREFIX/drive_c/users/$WINUSER/AppData/Local/HelloNeighbor/Saved/Config/WindowsNoEditor"
 mkdir -p "$CFG_DST"
 
@@ -559,6 +559,17 @@ FORCE_BACKEND=""     # "" (auto) | dxvk | wined3d
 WINDOWED=1
 ENABLE_CONSOLE=1
 EXTRA_GAME_ARGS=""
+
+# --- THE fix for "it starts, then vanishes after ~15 seconds" -------------
+# Not a Wine problem. tinyBuild document it themselves in "[PC] The game
+# crashes at start": on 10th-gen Intel CPUs and newer, set the environment
+# variable OPENSSL_ia32cap to :~0x20000000. The game bundles an old OpenSSL
+# that mis-detects the SHA-NI instructions those CPUs introduced, runs a
+# code path it was not built for, corrupts memory and dies with 0xC0000005
+# before Unreal's crash handler exists -- hence no crash report, and hence
+# the identical failure on every graphics driver, including a software one.
+# The launcher sets it for you. 0 disables it (for testing only).
+OPENSSL_FIX=1
 
 # --- if the game crashes while showing a frame --------------------------
 # Venus (Crostini's Vulkan driver) has a known bug presenting frames through
