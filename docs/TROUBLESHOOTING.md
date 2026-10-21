@@ -495,9 +495,14 @@ deviceName = Virtio-GPU Venus (Intel(R) Xe Graphics (TGL GT2))
 preset `VK_ICD_FILENAMES` names `virtio_icd.i686.json` and
 `virtio_icd.x86_64.json`, so it is tempting to symlink *both* to it. Doing so
 makes the loader open the same driver twice and enumerate one GPU as two
-identical adapters. DXVK then creates its surface through one instance and
-queries formats through the other; the driver rejects the mismatch, the Unix
-call returns a non-zero status, and the generated thunk aborts.
+identical adapters, which is worth cleaning up regardless.
+
+> **Measured result:** on the reference Chromebook, removing the duplicate
+> brought `vulkaninfo` down to one adapter and DXVK's `dxgi.log` down to one
+> `Found device:` line, but the `vkGetPhysicalDeviceSurfaceFormatsKHR`
+> assertion was **unchanged**. A duplicate adapter is therefore *not* a
+> confirmed cause of that assertion -- treat this section as hygiene, and see
+> *Narrowing down a Vulkan surface crash* below for the actual procedure.
 
 **Fix.** Keep only the `x86_64` link. The loader ignores the missing `i686`
 entry, which is exactly what we want:
@@ -513,3 +518,31 @@ still works on a system where the stray link is present.
 
 > Verify with `vulkaninfo --summary | grep -c deviceName` -- it should print
 > `1`.
+
+### Narrowing down a Vulkan surface crash
+
+Several of the settings this project applies were introduced to work around
+bugs in *older* Wine releases:
+
+| Setting | Added to fix | Still needed on Wine 11? |
+|---|---|---|
+| `dxgi.deferSurfaceCreation` | `CreateSwapChain` returning `E_FAIL` on Wine 8 | unknown -- test it |
+| `MESA_VK_WSI_DEBUG=sw` | `887A0020` in `D3D11Viewport.cpp` on Wine 8 | unknown -- test it |
+
+Both of them change *when and how the Vulkan surface is created*, which is
+exactly the area a `vkGetPhysicalDeviceSurfaceFormatsKHR` assertion points at.
+A workaround that was load-bearing on one Wine version can become the cause of
+the next failure, so they should be re-tested after any Wine upgrade rather
+than assumed.
+
+Instead of editing a file, relaunching and reading a log six times over, run:
+
+```bash
+./tools/try-fixes.sh
+```
+
+It launches the game under each combination in turn, gives each one a time
+limit so a Wine error dialog cannot stall the run, recognises the known
+failure signatures, restores `dxvk.conf` afterwards and prints a summary
+table. `--seconds N` changes the per-attempt time limit and `--only N` runs a
+single row.

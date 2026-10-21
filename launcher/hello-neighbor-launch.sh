@@ -305,7 +305,8 @@ else
     # nothing and records the adapter, the features negotiated and any
     # Vulkan error. HN_DXVK_LOG=none turns it off.
     export DXVK_LOG_LEVEL="${HN_DXVK_LOG:-info}"
-    export DXVK_CONFIG_FILE="$APP_HOME/dxvk.conf"
+    # Allow an outside caller (tools/try-fixes.sh) to point at a variant.
+    export DXVK_CONFIG_FILE="${DXVK_CONFIG_FILE:-$APP_HOME/dxvk.conf}"
     mkdir -p "$DXVK_STATE_CACHE_PATH"
 fi
 
