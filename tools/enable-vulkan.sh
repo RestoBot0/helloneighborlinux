@@ -151,8 +151,12 @@ if timeout 30 vulkaninfo --summary 2>&1 | grep -qiE 'driverName\s*=\s*venus|Venu
   ok "${B}Venus is working -- hardware Vulkan is live${N}"
   timeout 30 vulkaninfo --summary 2>&1 | grep -iE 'deviceName|driverName|apiVersion|deviceType' | head -8 | sed 's/^/    /'
   echo
-  ok "Next: re-run the installer so it picks DXVK instead of WineD3D:"
-  echo "       cd ~/helloneighborlinux && ./install.sh --game-dir ~/'Hello Neighbor FILE FOR ARENA' --no-deps"
+  if [ -f "$HOME/.local/share/hello-neighbor/prefix/.dxvk-installed" ]; then
+    ok "DXVK is already installed -- just launch the game from your ChromeOS launcher."
+  else
+    ok "Next: re-run the installer so it picks DXVK instead of WineD3D:"
+    echo "       cd ~/helloneighborlinux && ./install.sh --game-dir ~/'Hello Neighbor FILE FOR ARENA' --no-deps"
+  fi
 else
   warn "Venus did not come up cleanly. Diagnostics:"
   timeout 30 vulkaninfo --summary 2>&1 | head -20 | sed 's/^/    /'
