@@ -220,6 +220,18 @@ if [ "$BACKEND" = "wined3d" ]; then
     export MESA_GLSL_VERSION_OVERRIDE="${MESA_GLSL_VERSION_OVERRIDE:-460}"
     export MESA_EXTENSION_MAX_YEAR=2020
 else
+    # Venus (Crostini's Vulkan driver) has a known bug presenting frames
+    # through X11/XWayland: the swapchain either tears badly or hangs on the
+    # first present. MESA_VK_WSI_DEBUG=sw moves ONLY the final "copy the
+    # finished frame to the window" step onto the CPU. All rendering stays on
+    # the GPU, so the cost is a few percent, not a fallback to software.
+    # Set HN_VK_WSI_SW=0 in launcher.conf to try the native path.
+    if [ "${HN_VK_WSI_SW:-auto}" != "0" ]; then
+        if [ "${HN_VK_WSI_SW:-auto}" = "1" ] || [ -e /dev/wl0 ]; then
+            export MESA_VK_WSI_DEBUG=sw
+            log "Venus WSI workaround active (MESA_VK_WSI_DEBUG=sw)"
+        fi
+    fi
     export DXVK_STATE_CACHE_PATH="$APP_HOME/cache/dxvk"
     export DXVK_LOG_PATH="$LOG_DIR"
     export DXVK_LOG_LEVEL=none
