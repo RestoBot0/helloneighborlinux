@@ -660,6 +660,25 @@ ours: a brief window, then the process exits with no error. Worth a
 run with `WINE_CPU_TOPOLOGY=4:0,1,2,3` and without
 `-USEALLAVAILABLECORES`.
 
+## RESULT: the graphics stack is not the cause
+
+The lavapipe run settled it. With Venus removed and the entire render
+path running on the CPU, the game still exited rc=5 after 15 seconds --
+the same failure, to the second.
+
+The crash is now independent of every one of these:
+
+  * DXVK version (2.3.1 and 1.10.3)
+  * Vulkan driver (Venus on the GPU, lavapipe on the CPU)
+  * Window system (winex11.drv and winewayland.drv)
+  * The Venus WSI workaround, on and off
+  * esync/fsync, on and off
+  * Audio, on and off
+  * Windowed, virtual desktop, and resolution
+
+Something kills this process about fifteen seconds in regardless of how
+it is drawing. Stop tuning the renderer.
+
 ## The decisive test: lavapipe (CPU Vulkan)
 
 Everything so far has gone through Venus, ChromeOS's Vulkan passthrough.
