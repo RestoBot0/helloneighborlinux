@@ -27,6 +27,45 @@ Or just right-click the icon → **Play in a window**.
 
 ---
 
+## "LowLevelFatalError ... can't be replaced with the new one of different type!"
+
+```
+LowLevelFatalError [File:Unknown] [Line: 1312]
+Console object named 'r.RHIThread.Enable' can't be replaced with the
+new one of different type!
+```
+
+**Cause:** a console variable was set in an `.ini` *before* the module that
+owns it had registered it. UE4 creates an untyped placeholder from the ini
+value; when the real variable registers later with a concrete type, the engine
+refuses to reconcile them and hard-crashes.
+
+It is always a config bug, never a Wine or GPU problem — the game got far
+enough to parse your config, which means the wrapper is working.
+
+**Known offenders — never put these in an ini:**
+
+| Variable | Why |
+|---|---|
+| `r.RHIThread.Enable` | registered by the RHI module after config parse |
+| `r.RHICmdBypass` | same |
+| `rhi.SyncInterval` | same |
+| `AllowConsoleInShipping` | **not a cvar at all** — a compile-time macro. Any name that doesn't exist becomes a placeholder landmine. |
+
+**Fix** (removes them from the installed config, no reinstall):
+
+```bash
+find ~/.local/share/hello-neighbor/prefix -path '*HelloNeighbor*' -name 'Engine.ini' \
+  -exec sed -i -E '/^(r\.RHIThread\.Enable|r\.RHICmdBypass|rhi\.SyncInterval|FX\.BatchAsync|FX\.EarlyScheduleAsync|AllowConsoleInShipping|con\.DebugEarlyDefault)=/d' {} +
+```
+
+**If it names a different variable,** delete that line from
+`Engine.ini` the same way. The crash message always tells you exactly which
+one, and nothing in `[SystemSettings]` is load-bearing — removing any single
+line costs you a little performance at worst.
+
+---
+
 ## It doesn't start at all
 
 Work down this list:
