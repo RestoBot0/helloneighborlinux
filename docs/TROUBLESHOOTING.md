@@ -623,3 +623,39 @@ there, which is the one place a Shipping build's log survives.
 
 This is far better evidence than a Wine exit code, so read it first whenever
 the game dies after the engine has started.
+
+## Things that are NOT a fallback (do not suggest these)
+
+**Steam for Chromebook / Borealis is gone.** Google and Valve ended the
+beta on 1 January 2026, and games installed through it stopped working
+on that date. It is not an alternative route for this game, and no
+replacement native client has been announced.
+
+## Untried lever: Wine's native Wayland driver
+
+On Crostini the X11 path is long -- Wine -> winex11.drv -> Xwayland ->
+sommelier -> ChromeOS Exo -- and the Venus Vulkan presentation bug we
+work around with `MESA_VK_WSI_DEBUG=sw` lives in that X11 leg. Wine 11
+ships a much more complete `winewayland.drv`, which talks to sommelier
+directly and skips Xwayland entirely.
+
+Wine prefers X11 whenever `DISPLAY` is set, so the Wayland driver has
+never been exercised here. To try it:
+
+    WINEPREFIX=~/.local/share/hello-neighbor/prefix \
+      wine reg add 'HKCU\Software\Wine\Drivers' /v Graphics /t REG_SZ /d 'wayland,x11' /f
+    env -u DISPLAY ~/.local/share/hello-neighbor/bin/hello-neighbor-launch
+
+To undo:
+
+    WINEPREFIX=~/.local/share/hello-neighbor/prefix \
+      wine reg delete 'HKCU\Software\Wine\Drivers' /v Graphics /f
+
+## Untried lever: CPU topology
+
+Several Unreal Engine titles are documented on ProtonDB as failing to
+start under Wine on modern Intel laptop CPUs, fixed by hiding most of
+the CPU from the game with `WINE_CPU_TOPOLOGY`. The symptom matches
+ours: a brief window, then the process exits with no error. Worth a
+run with `WINE_CPU_TOPOLOGY=4:0,1,2,3` and without
+`-USEALLAVAILABLECORES`.
