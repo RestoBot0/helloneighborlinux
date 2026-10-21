@@ -18,7 +18,7 @@ echo "Stopping any running instance..."
 "$APP_HOME/bin/hello-neighbor-launch" --kill >/dev/null 2>&1 || true
 
 echo "Removing the shelf entry and icons..."
-rm -f "$DESKTOP_DIR/$APP_ID.desktop"
+rm -f "$DESKTOP_DIR/$APP_ID.desktop" "$DESKTOP_DIR/$APP_ID-safe.desktop"
 for sz in 16 24 32 48 64 128 256 512; do
   rm -f "$ICON_BASE/${sz}x${sz}/apps/$APP_ID.png"
 done

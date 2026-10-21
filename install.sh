@@ -448,6 +448,28 @@ DESKTOP
 chmod 0644 "$DESKTOP_DIR/$APP_ID.desktop"
 ok ".desktop -> $DESKTOP_DIR/$APP_ID.desktop"
 
+# ChromeOS's shelf/launcher does NOT surface Desktop Actions the way GNOME
+# does, so the right-click fallbacks above are invisible there. Ship Safe
+# Mode as its own launcher entry so it's actually reachable.
+cat > "$DESKTOP_DIR/$APP_ID-safe.desktop" <<DESKTOPSAFE
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Hello Neighbor (Safe Mode)
+GenericName=Stealth Horror Game
+Comment=Maximum-compatibility mode: windowed, 1024x576, OpenGL. Use if the normal icon won't start.
+Exec=$BIN_DIR/hello-neighbor-launch --safe
+Icon=$APP_ID
+Terminal=false
+Categories=Game;ActionGame;AdventureGame;
+Keywords=hello;neighbor;safe;compatibility;troubleshoot;
+StartupNotify=true
+StartupWMClass=helloneighbor-win64-shipping.exe
+NoDisplay=false
+DESKTOPSAFE
+chmod 0644 "$DESKTOP_DIR/$APP_ID-safe.desktop"
+ok ".desktop (safe mode) -> $DESKTOP_DIR/$APP_ID-safe.desktop"
+
 if have desktop-file-validate; then
   desktop-file-validate "$DESKTOP_DIR/$APP_ID.desktop" && ok ".desktop validates clean" \
     || warn ".desktop has validation warnings (usually harmless)"

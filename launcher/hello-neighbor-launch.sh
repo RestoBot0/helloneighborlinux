@@ -51,6 +51,7 @@ RES_H=720
 FORCE_BACKEND=""      # "" | dxvk | wined3d
 WINDOWED=0
 ENABLE_CONSOLE=1
+USE_SM4=0          # UE4 shipping builds rarely cook SM4 shaders
 EXTRA_GAME_ARGS=""
 # shellcheck disable=SC1090
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
@@ -64,7 +65,8 @@ DEBUG=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --windowed) WINDOWED=1 ;;
-        --safe)     FORCE_BACKEND="wined3d"; SAFE_MODE=1 ;;
+        --safe)     FORCE_BACKEND="wined3d"; SAFE_MODE=1; WINDOWED=1; RES_W=1024; RES_H=576 ;;
+        --sm4)      USE_SM4=1 ;;
         --gl)       FORCE_BACKEND="wined3d" ;;
         --vk)       FORCE_BACKEND="dxvk" ;;
         --console)  ENABLE_CONSOLE=1 ;;
@@ -221,9 +223,16 @@ fi
 ARGS+=("-USEALLAVAILABLECORES")
 
 if [ "$BACKEND" = "wined3d" ] || [ "$SAFE_MODE" = "1" ]; then
-    # SM4 / DX10 feature level: materially cheaper shaders, and WineD3D's
-    # GL translation of SM5 is where most of the stuttering comes from.
-    ARGS+=("-dx10" "-sm4")
+    # Plain D3D11. Do NOT add -dx10/-sm4 by default: UE4 shipping builds
+    # normally only cook SM5 shaders, so forcing Shader Model 4 makes the
+    # renderer ask for shaders that were never packaged. It gets null back
+    # and writes to it, which surfaces as:
+    #   "Unhandled page fault on write access to 0000000000000000"
+    # before Unreal has even opened its own log file.
+    # Opt in with --sm4 only if you know this build cooked SM4 shaders.
+    if [ "$USE_SM4" = "1" ]; then
+        ARGS+=("-dx10" "-sm4")
+    fi
 else
     ARGS+=("-dx11")
 fi
