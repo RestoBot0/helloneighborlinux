@@ -150,6 +150,7 @@ class Editor:
             self._mark32(c, 'GatherableTextDataOffset')
         self.export_count = c.i32()
         self.export_offset = self._mark32(c, 'ExportOffset')
+        self.import_count_at = c.o
         self.import_count = c.i32()
         self.import_offset = self._mark32(c, 'ImportOffset')
         self._mark32(c, 'DependsOffset')
@@ -209,6 +210,9 @@ class Editor:
             rec['classname'] = self.nm(cn)
             rec['objectname'] = self.nm(ob)
             self.imports.append(rec)
+        self.import_table_end = ic.o
+        self.new_imports = []
+        self.pending = []           # (abs_offset, struct_fmt, value) size-neutral
 
         # --- exports: remember where each SerialOffset sits ---
         self.exports = []
@@ -260,6 +264,17 @@ class Editor:
         self.names.append(s)
         return len(self.names) - 1
 
+    def add_import(self, classpackage, classname, outer, objectname):
+        """Append an import record. Returns its FPackageIndex (negative)."""
+        self.new_imports.append((self.add_name(classpackage), self.add_name(classname),
+                                 outer, self.add_name(objectname)))
+        idx = len(self.imports) + len(self.new_imports)
+        return -idx
+
+    def write_object_ref(self, abs_offset, package_index):
+        """Queue a 4-byte FPackageIndex write at an offset in the ORIGINAL file."""
+        self.pending.append((abs_offset, '<i', package_index))
+
     def set_import_field(self, imp_index, field, name):
         """Point one FName field of an import at `name` (added if needed)."""
         rec = self.imports[imp_index]
@@ -274,6 +289,10 @@ class Editor:
     # --------------------------------------------------------------- write
     def save(self):
         d = bytearray(self.data)
+
+        # 0. size-neutral writes, applied before anything moves
+        for at, fmt, val in self.pending:
+            struct.pack_into(fmt, d, at, val)
 
         # 1. pending FName writes into import records (fixed size, no shift)
         for rec in self.imports:
@@ -292,28 +311,44 @@ class Editor:
             if self.ue4ver >= 504:
                 blob += struct.pack('<HH', strihash(s), strcrc32(s))
 
-        old_len = self.name_table_end - self.name_offset
-        delta = len(blob) - old_len
+        # 3. append any new import records (fixed 28 bytes each)
+        extra = bytearray()
+        for cp, cn, outer, ob in self.new_imports:
+            extra += struct.pack('<q', cp) + struct.pack('<q', cn)
+            extra += struct.pack('<i', outer) + struct.pack('<q', ob)
+
+        d_name = len(blob) - (self.name_table_end - self.name_offset)
+        d_imp = len(extra)
+
+        # splice both tables in, later one first so earlier offsets stay valid
+        d[self.import_table_end:self.import_table_end] = extra
         d[self.name_offset:self.name_table_end] = blob
         struct.pack_into('<i', d, self.name_count_at, len(self.names))
+        if d_imp:
+            struct.pack_into('<i', d, self.import_count_at,
+                             self.import_count + len(self.new_imports))
 
-        if delta:
-            # 3. every absolute offset after the name table moves
-            for label, at in self.i32_fields.items():
-                v = struct.unpack_from('<i', d, at)[0]
-                if v > self.name_offset:
-                    struct.pack_into('<i', d, at, v + delta)
-            for label, at in self.i64_fields.items():
-                v = struct.unpack_from('<q', d, at)[0]
-                if v > self.name_offset:
-                    struct.pack_into('<q', d, at, v + delta)
-            # 4. and so does every export's data
+        # 4. anything whose offset sat after an insertion point has moved
+        def shift(v):
+            if v <= 0:
+                return v
+            s = 0
+            if v >= self.name_table_end:
+                s += d_name
+            if v >= self.import_table_end:
+                s += d_imp
+            return v + s
+
+        if d_name or d_imp:
+            for at in self.i32_fields.values():
+                at2 = at
+                struct.pack_into('<i', d, at2, shift(struct.unpack_from('<i', d, at2)[0]))
+            for at in self.i64_fields.values():
+                struct.pack_into('<q', d, at, shift(struct.unpack_from('<q', d, at)[0]))
+            fmt = '<q' if self.ue4ver >= 511 else '<i'
             for rec in self.exports:
-                at = rec['off_at'] + delta
-                fmt = '<q' if self.ue4ver >= 511 else '<i'
-                v = struct.unpack_from(fmt, d, at)[0]
-                if v > self.name_offset:
-                    struct.pack_into(fmt, d, at, v + delta)
+                at = rec['off_at'] + d_name + d_imp
+                struct.pack_into(fmt, d, at, shift(struct.unpack_from(fmt, d, at)[0]))
         return bytes(d)
 
 
