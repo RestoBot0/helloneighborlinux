@@ -9,6 +9,9 @@ class R:
     def __init__(self, b, o=0):
         self.b = b; self.o = o
 
+    def u8(self):
+        v = self.b[self.o]; self.o += 1; return v
+
     def i32(self):
         v = struct.unpack_from('<i', self.b, self.o)[0]; self.o += 4; return v
 
