@@ -32,13 +32,20 @@ PAK="${1:-}"
 if [ -z "$PAK" ]; then
     # -L is essential: the install's game/ directory is usually a symlink to
     # wherever the game really lives, and plain find will not descend into it.
+    #
+    # But -L makes a Wine prefix lethal: prefix/dosdevices/z: points at /, so
+    # find walks the whole root filesystem and then spins forever inside
+    # /dev/.lxc/sys/... emitting "File system loop detected". Prune the Wine
+    # directories before descending.
     for root in \
         "$HOME/.local/share/hello-neighbor/game" \
         "$HOME/Hello Neighbor FILE FOR ARENA" \
         "$HOME"
     do
         [ -e "$root" ] || continue
-        PAK="$(find -L "$root" -name 'FoxyReignited.pak' -not -name '*.bak' 2>/dev/null | head -1)"
+        PAK="$(find -L "$root" \
+                 \( -name dosdevices -o -name prefix -o -name '.wine*' \) -prune -o \
+                 -name 'FoxyReignited.pak' -print 2>/dev/null | head -1)"
         [ -n "$PAK" ] && break
     done
 fi
@@ -49,7 +56,8 @@ error: could not find FoxyReignited.pak.
 
 Locate it yourself with:
 
-    find -L ~ -name 'FoxyReignited.pak'
+    find -L ~ \( -name dosdevices -o -name prefix \) -prune -o \
+         -name 'FoxyReignited.pak' -print
 
 then re-run this script with the path:
 
@@ -88,5 +96,5 @@ other actions silently did nothing. It uses the stock Neighbour one instead,
 which drives the Cat mesh fine because the Cat is rigged to the Neighbour's
 skeleton.
 
-To undo:  mv "<pak>.bak" "<pak>"
+To undo:  cp "<pak>.bak" "<pak>"   (the .bak is never overwritten)
 MSG
