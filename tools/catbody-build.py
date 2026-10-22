@@ -205,6 +205,22 @@ def build(src, dst):
     set_ref(prop(mesh, 'SkeletalMesh'), cat_rig, 'Cat_in_the_hat_rig')
     set_ref(prop(mesh, 'AnimClass'), sosed_abp,
             'SosedAnimBlueprint_C  (has a DefaultSlot; CATAnimBlueprint does not)')
+    # Foxy nudges the mesh 10cm back and 5.5cm right to line his own model up
+    # with the capsule. On the Cat that just desyncs the body from its
+    # collision - "the hitbox is different". BP_Cat_hat sets nothing here.
+    kill_tag(prop(mesh, 'RelativeLocation'), '(stock (0,0,-90): body back in its capsule)')
+
+    # ---- the eyes ------------------------------------------------------
+    # ScannerComponent is what the Neighbour sees with. Foxy parks it at
+    # z = 285cm with a 90 degree yaw to suit his tall animatronic head. The Cat
+    # is about 180cm, so the sight traces start a metre above its head and run
+    # into the ceiling - he can hear but not see. BP_Cat_hat sets only
+    # AttachParent, so dropping both tags restores exactly the Cat mod's setup.
+    e = find_export(a, 'ScannerComponent')
+    scan = walk(a, data, e['off'], e['off'] + e['size'])
+    log.append('ScannerComponent (sight)')
+    kill_tag(prop(scan, 'RelativeLocation'), '(was 285cm up - he was blind)')
+    kill_tag(prop(scan, 'RelativeRotation'), '(was yawed 90 degrees)')
 
     # ---- the class default object --------------------------------------
     e = find_export(a, 'Default__AI_Foxy_Original_C')
@@ -265,6 +281,8 @@ def build(src, dst):
         raise SystemExit('Animations: missing fields %s' % sorted(unseen))
 
     # ---- audio components ----------------------------------------------
+    # Their RelativeLocations are placed for Foxy's head height too (159cm and
+    # 250cm up), which puts the emitters above the Cat and hurts attenuation.
     for comp, idx, what in (
         ('attack_sound_GEN_VARIABLE', panic, 'Cat panic_Cue (chase music)'),
         ('Audio_GEN_VARIABLE', whistle, 'Cat_Whistling_Bored_Talking_Cue (idle)'),
@@ -273,6 +291,7 @@ def build(src, dst):
         ps = walk(a, data, e['off'], e['off'] + e['size'])
         log.append(comp)
         set_ref(prop(ps, 'Sound'), idx, what)
+        kill_tag(prop(ps, 'RelativeLocation'), '(emitter was above the Cat)')
 
     # ---- stop BeginPlay installing Foxy animations on the world ---------
     # ReceiveBeginPlay sweeps the level and overwrites the animation that every
