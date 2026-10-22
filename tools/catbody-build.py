@@ -376,25 +376,14 @@ def build(src, dst):
         return hits[0]
 
     # ---- let the base game be heard again -------------------------------
-    # The second BP_Human block also flattens m_FearParams, which is the base
-    # game's own "he is close" post process, not a sound. Nothing asked for
-    # that to go, so blank just those writes and keep the three Clear_Cue
-    # ones. EX_Nothing is a one-byte statement, so the region can be filled
-    # with it without moving anything after it.
-    EX_NOTHING = 0x0B
-    fstart = find_once(bytes([0x42]) + struct.pack('<i', prop_index('PostProcessMaterial')),
-                       'FearParams.PostProcessMaterial') - 1
-    fend = find_once(bytes([0x01]) + struct.pack('<i', prop_index('m_FearParams')),
-                     'm_FearParams') + 5 + 5
-    if code[fend] != 0x4D or fend - fstart != 101:      # EX_PopExecutionFlow
-        raise SystemExit('FearParams: unexpected block shape, refusing to patch')
-    ed.pending.append((uber['off'] + uhdr + fstart, '<%ds' % (fend - fstart),
-                       bytes([EX_NOTHING]) * (fend - fstart)))
-    log.append('BP_Human: stop muting the base game')
-    log.append('  keep     %-16s (base catch sound + chase music go quiet,'
-               ' so the Cat can be heard)' % 'both casts')
-    log.append('  blank    %-16s (keep the base game\'s own proximity effect)'
-               % 'm_FearParams')
+    # Both BP_Human_C casts are kept alive (see BLOCKS above). Those two
+    # blocks mute the base game's own catch sound and proximity chase music
+    # so the mod's can be heard.
+    #
+    # The second block also flattens m_FearParams, the base game's "he is
+    # close" post process, which nobody asked for. DO NOT try to blank those
+    # writes: see the runtime-size guard below for why that is not possible.
+    log.append('BP_Human: both casts kept, so the base game stops talking over the Cat')
 
     # ---- put the Cat's own speeds back -----------------------------------
     # The CDO numbers set above are only half the story: the ubergraph also
@@ -448,7 +437,45 @@ def build(src, dst):
     log.append('Jumpscared')
     log.append('  blank    %-16s (was: delay 1s -> WG_SdaltSpam full screen)' % 'body')
 
+    # ---- guard: the runtime bytecode length must not move ----------------
+    # Cooked bytecode is stored in a SHORTER serialised form than the one the
+    # engine runs: an object or property reference is a 4-byte FPackageIndex
+    # on disk and an 8-byte pointer in memory. Jump targets, latent-action
+    # linkages and the ubergraph's own entry points are all *runtime* offsets,
+    # and the header's ScriptBytecodeSize is a runtime length too.
+    #
+    # So "same number of bytes on disk" is NOT good enough. Filling a region
+    # with EX_Nothing is byte-for-byte neutral on disk and still shortens the
+    # runtime image, which silently desynchronises every jump after it and
+    # corrupts the asset. That mistake shipped once; this is the stop.
+    import kismet
     out = ed.save()
+    a2 = type(a)(out)
+    for e2 in a2.exports:
+        blob2 = out[e2['off']:e2['off'] + e2['size']]
+        try:
+            h2, s2 = find_script(blob2)
+        except BaseException:
+            continue                       # not a function, or no bytecode
+        e1 = [x for x in a.exports if x['name'] == e2['name']]
+        if not e1:
+            continue
+        blob1 = data[e1[0]['off']:e1[0]['off'] + e1[0]['size']]
+        try:
+            h1, s1 = find_script(blob1)
+        except BaseException:
+            continue
+        if e2['name'] == 'Jumpscared':
+            continue                       # body replaced wholesale, size rewritten
+        rt1 = kismet.Dis(a, blob1[h1:h1 + s1]).run()
+        rt2 = kismet.Dis(a2, blob2[h2:h2 + s2]).run()
+        end1 = rt1[-1][1] if rt1 else 0
+        end2 = rt2[-1][1] if rt2 else 0
+        if end1 != end2:
+            raise SystemExit(
+                '%s: runtime bytecode length changed %d -> %d. Every jump '
+                'offset after the edit is now wrong and the asset would be '
+                'corrupt. Refusing to write.' % (e2['name'], end1, end2))
     open(dst, 'wb').write(out)
     print('\n'.join(log))
     print('\n%s -> %s   %d -> %d bytes (%+d)' %
