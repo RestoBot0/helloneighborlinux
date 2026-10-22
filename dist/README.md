@@ -1,34 +1,43 @@
-# Cat_In_The_Hat (door-breaking edition)
+# dist - built mod files
 
-The Cat in the Hat with Foxy's door-breaking grafted on, while keeping his own
-model, animations, jump and speed.
+## catbody/ - the Cat-bodied Neighbour (current)
 
-## How it works
+`AI_Foxy_Original.uasset` replaces the same file inside `FoxyReignited.pak`.
+`APPLY.sh` rebuilds the pak with it, keeping `<pak>.bak` so repeat runs are
+safe and reversible.
 
-`BP_Cat_hat` has no code of its own at all - it is a costume with a parent.
-Its parent was `BP_Sosed_C`, the stock Neighbour. This build repoints that
-parent at `AI_Foxy_Original_C`, so the Cat inherits Foxy's entire Blueprint
-class, including the trigger box and the ubergraph that swaps a door for a
-pre-fractured one and plays `Door_Break_Cue`.
+In the game's Modding menu pick **FoxyReignited**, not Cat_In_The_Hat. Both
+mods must be installed - the Cat pak supplies the mesh and the sounds that
+this asset points at.
 
-Everything the Cat overrides in his own defaults still wins: his skeletal
-mesh, his anim Blueprint, `m_fRun 5500`, `JumpMaxCount 3`, tomato off.
+Built by `tools/catbody-build.py` from the stock asset, entirely by name
+lookup. What it changes and why is documented in that script's docstring; the
+short version:
 
-Three import records changed, three names added. No Foxy content is copied in.
+| change | reason |
+| --- | --- |
+| `CharacterMesh0.SkeletalMesh` -> `Cat_in_the_hat_rig` | the Cat mesh is rigged to the stock `neighbour_lowpoly_Skeleton`, so it is a straight swap |
+| `CharacterMesh0.AnimClass` -> `SosedAnimBlueprint_C` | the Cat mod's `CATAnimBlueprint` has **no** `AnimNode_Slot`/`DefaultSlot`, and a montage with no matching slot in the AnimGraph silently renders nothing - that is why the Cat could not open doors and most of its actions were missing |
+| `Animations`, `Sounds`, `Head` tags renamed to `HNX_Removed` | makes UE4 skip the tag so the value falls back to `BP_Sosed`'s; Foxy's animations are built for `Ignited_Foxy_Skeleton` and cannot play on the Cat |
+| `SoundStruck` -> Cat `secretsound_Cue` | matches what `BP_Cat_hat` does |
+| `attack_sound.Sound` -> Cat `panic_Cue` | the chase music; same component the Cat mod uses for it |
+| `Audio.Sound` -> `Cat_Whistling_Bored_Talking_Cue` | replaces Foxy's `IdleNoises_Cue`, the mechanical whirring |
+| `ClassBearTrap` tag removed | falls back to the stock `BP_Trap_C` instead of `BP_FoxyTrap_C` |
+| `Jumpscared()` body replaced with a bare return | that event was `Delay(1s)` then `Create(WG_SdaltSpam_C)` + `AddToViewport`. The "HEY" shout is a different event (`IntroWidgets` -> `WG_FshoutFR_C`) and is left alone |
+| speeds 600 / 600 / 5500, traps all on except tomato | the requested spec |
 
-## Install
+The ubergraph bytecode is byte-identical to the original, and 417 of the 422
+exports are untouched byte for byte.
 
-Both folders go in `<game>/HelloNeighbor/Mods/`:
+## Cat_In_The_Hat_STOCK.zip
 
-    Mods/Cat_In_The_Hat/      <- from this zip
-    Mods/FoxyReignited/       <- the unmodified mod from ModDB
+The Cat mod exactly as downloaded, repacked. Use this one.
 
-FoxyReignited must be present because the Cat now inherits from a class that
-lives inside it. You do not select it - you select **Cat_In_The_Hat** in the
-Modding menu. Its pak still gets mounted, which is what makes the parent
-class resolvable.
+## Cat_In_The_Hat.zip - DEAD END, do not use
 
-## Credits
-
-Cat in the Hat by Endersteve8479. Foxy Reignited by Sdalt. This is a personal
-edit of both; please keep them credited.
+An attempt to reparent `BP_Cat_hat_C` onto `AI_Foxy_Original_C`. Tested on
+hardware: a cooked `BlueprintGeneratedClass` inherits its parent's *data* but
+runs none of its *code*, so the Cat got Foxy's animations and sounds and none
+of his behaviour. FoxyReignited itself demonstrates the same thing -
+`AI_Foxy_Nightmare` is a full duplicate of `AI_Foxy_Original`, not a subclass.
+Kept only so the mistake is not repeated.

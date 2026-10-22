@@ -81,8 +81,12 @@ Done.
 In the Modding menu pick FoxyReignited - NOT Cat_In_The_Hat. The Cat you see
 is Foxy's class wearing the Cat's body.
 
-Keep the stock Cat_In_The_Hat mod installed; its files supply the mesh and
-the anim blueprint.
+Keep the Cat_In_The_Hat mod installed. Its pak supplies the Cat mesh and the
+Cat sounds; this build points at them by name. It does NOT use the Cat's own
+animation blueprint - that one has no montage slot, so door opening and most
+other actions silently did nothing. It uses the stock Neighbour one instead,
+which drives the Cat mesh fine because the Cat is rigged to the Neighbour's
+skeleton.
 
 To undo:  mv "<pak>.bak" "<pak>"
 MSG
