@@ -327,7 +327,10 @@ def build(src, dst):
               ('BP_Toilet_C', 1, 1), ('BP_Bed_C', 1, 1), ('BP_TwinBed_C', 1, 1),
               ('BP_Cupboard_C', 1, 1), ('BP_Trap_C', 1, 1), ('BP_Ladder_C', 1, 1),
               ('BP_TV_C', 1, 1), ('BP_DoorTimesDay_C', 1, 1),
-              ('BP_Human_C', 2, 2),
+              # both BP_Human casts are KEPT: they are the blocks that mute the
+              # base game's own catch sound and proximity music, which were
+              # drowning out the Cat's. They touch no animations.
+              ('BP_Human_C', 2, 0),
               # two casts: the first is the BeginPlay animation override, the
               # second drives the door break. Only ever kill the first.
               ('Door_inward_C', 2, 1)]
@@ -350,8 +353,86 @@ def build(src, dst):
             killed += 1
         log.append('  skip     %-22s cast at +%d%s' %
                    (cls, found[0], '' if kill == expect else '  (kept %d)' % (expect - kill)))
-    if killed != 21:
-        raise SystemExit('expected to neutralise 21 casts, did %d' % killed)
+    if killed != 19:
+        raise SystemExit('expected to neutralise 19 casts, did %d' % killed)
+
+    def prop_index(name):
+        hits = [-(i + 1) for i, imp in enumerate(a.imports) if imp[3] == name]
+        hits += [i + 1 for i, e in enumerate(a.exports) if e['name'] == name]
+        if len(hits) != 1:
+            raise SystemExit('property %r found %d times' % (name, len(hits)))
+        return hits[0]
+
+    def find_once(needle, what):
+        hits, at = [], 0
+        while True:
+            at = code.find(needle, at)
+            if at < 0:
+                break
+            hits.append(at)
+            at += 1
+        if len(hits) != 1:
+            raise SystemExit('%s: pattern matched %d times' % (what, len(hits)))
+        return hits[0]
+
+    # ---- let the base game be heard again -------------------------------
+    # The second BP_Human block also flattens m_FearParams, which is the base
+    # game's own "he is close" post process, not a sound. Nothing asked for
+    # that to go, so blank just those writes and keep the three Clear_Cue
+    # ones. EX_Nothing is a one-byte statement, so the region can be filled
+    # with it without moving anything after it.
+    EX_NOTHING = 0x0B
+    fstart = find_once(bytes([0x42]) + struct.pack('<i', prop_index('PostProcessMaterial')),
+                       'FearParams.PostProcessMaterial') - 1
+    fend = find_once(bytes([0x01]) + struct.pack('<i', prop_index('m_FearParams')),
+                     'm_FearParams') + 5 + 5
+    if code[fend] != 0x4D or fend - fstart != 101:      # EX_PopExecutionFlow
+        raise SystemExit('FearParams: unexpected block shape, refusing to patch')
+    ed.pending.append((uber['off'] + uhdr + fstart, '<%ds' % (fend - fstart),
+                       bytes([EX_NOTHING]) * (fend - fstart)))
+    log.append('BP_Human: stop muting the base game')
+    log.append('  keep     %-16s (base catch sound + chase music go quiet,'
+               ' so the Cat can be heard)' % 'both casts')
+    log.append('  blank    %-16s (keep the base game\'s own proximity effect)'
+               % 'm_FearParams')
+
+    # ---- put the Cat's own speeds back -----------------------------------
+    # The CDO numbers set above are only half the story: the ubergraph also
+    # writes speeds at runtime, and those writes win. Foxy's are baked in, so
+    # without this the Cat still chases at Foxy's 3500, and - the important
+    # one - breaks into a 2100 sprint the moment he goes to investigate a
+    # noise. That is far too fast for the door-opening animation to get a
+    # chance to play, which is why he just barges into doors when he is not
+    # chasing. EX_FloatConst is opcode + float, so each of these is a plain
+    # 4-byte overwrite.
+    EX_FLOAT, EX_INT = 0x1E, 0x1D
+    SPEEDS = [('m_fRun', 3500.0, 5500.0, 'chase speed, was Foxy\'s'),
+              ('MaxWalkSpeed', 3500.0, 5500.0, 'the same cap on the movement component'),
+              ('m_fWalk', 2100.0, 600.0, 'investigating a noise - this is the door fix'),
+              ('m_fWalk', 291.6666564941406, 600.0, 'once the hunt times out')]
+    log.append('runtime speeds (the ubergraph overwrites the values above)')
+    for name, was, now, why in SPEEDS:
+        var = bytes([0x01]) + struct.pack('<i', prop_index(name))
+        at = find_once(var + bytes([EX_FLOAT]) + struct.pack('<f', was),
+                       '%s = %s' % (name, was))
+        ed.pending.append((uber['off'] + uhdr + at + len(var) + 1, '<f', now))
+        log.append('  set      %-16s %7s -> %-6s %s'
+                   % (name, round(was, 1), round(now, 1), why))
+
+    # ---- make the chase music play on every chase ------------------------
+    # Entering the attack state rolls RandomIntegerInRange(0, 3) and only
+    # starts attack_sound when it comes up 2 - a one in four chance, which is
+    # the "chase music only appears rarely" report. Narrowing the range to
+    # (2, 2) makes the roll always succeed. Two 4-byte constants.
+    roll = (bytes([0x68]) + struct.pack('<i', prop_index('RandomIntegerInRange'))
+            + bytes([EX_INT]) + struct.pack('<i', 0)
+            + bytes([EX_INT]) + struct.pack('<i', 3))
+    at = find_once(roll, 'attack-music dice roll')
+    for k in (0, 1):
+        ed.pending.append((uber['off'] + uhdr + at + 5 + k * 5 + 1, '<i', 2))
+    log.append('attack state')
+    log.append('  set      %-16s %7s -> %-6s %s'
+               % ('music dice roll', '0..3', '2..2', 'it only fired 1 chase in 4'))
 
     # ---- blank the jumpscare -------------------------------------------
     e = find_export(a, 'Jumpscared')
