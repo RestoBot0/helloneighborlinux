@@ -20,3 +20,4 @@ game/
 
 # the manifest IS wanted - it's small text - so it is deliberately not ignored
 # (tools/make-manifest.sh writes ./manifest.txt)
+__pycache__/
