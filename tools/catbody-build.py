@@ -375,6 +375,38 @@ def build(src, dst):
             raise SystemExit('%s: pattern matched %d times' % (what, len(hits)))
         return hits[0]
 
+    # ---- take away the things nobody asked for --------------------------
+    # The mod puts hint widgets on screen and spawns an actor that binds F,
+    # Q, P and space. F plays "HEY" and yanks the neighbour's state; the
+    # others drive the nightmare-mode headlamp. None of that was wanted.
+    #
+    # Each one is an EX_ObjectConst (0x20) holding a 4-byte class reference,
+    # passed straight to Create() or BeginDeferredActorSpawnFromClass().
+    # Writing a null index is the smallest possible change and is neutral on
+    # disk and at runtime, so no jump target moves.
+    #
+    # Both callees are documented to cope with a null class:
+    #   UWorld::SpawnActor  -> "SpawnActor failed because no class was
+    #                           specified", returns NULL
+    #   CreateWidget        -> "CreateWidget called with a null class",
+    #                           returns nullptr
+    # and the AddToViewport that follows sits behind EX_Context, which skips
+    # itself when its object is null.
+    EX_OBJECT_CONST = 0x20
+    log.append('things that were never asked for')
+    for cls, why in (
+            ('WG_FshoutFR_C',   'the "press F to shout" hint'),
+            ('WG_FshoutFR2_C',  'the same hint, nightmare version'),
+            ('WG_Qlamp_C',      'a headlamp hint'),
+            ('WG_Qlamp2_C',     'a headlamp hint'),
+            ('BP_KeyInputs_C',  'the F / Q / P / space key handler'),
+            ('BP_HeadlampFR_C', 'the headlamp itself'),
+    ):
+        at = find_once(bytes([EX_OBJECT_CONST]) +
+                       struct.pack('<i', prop_index(cls)), cls)
+        ed.pending.append((uber['off'] + uhdr + at + 1, '<i', 0))
+        log.append('  drop     %-18s %s' % (cls, why))
+
     # ---- let the base game be heard again -------------------------------
     # Both BP_Human_C casts are kept alive (see BLOCKS above). Those two
     # blocks mute the base game's own catch sound and proximity chase music

@@ -3,6 +3,16 @@
 `ArenaNeighbor.zip` — 25.8 MB — the finished mod, ready to drop in. No scripts,
 no patching, no terminal.
 
+**1.1** — the neighbour asset is renamed too, so the Modding menu lists him as
+`AI_ArenaNeighbor` instead of `AI_Foxy_Original`. The F-key "HEY" shout, its
+on-screen hint, the headlamp and the headlamp hints are all gone.
+
+The second entry in that list, `AI_Foxy_Nightmare`, is still there. Deleting
+the file is not enough on its own: it is also listed in the mod's
+`AssetRegistry.bin`, and a menu entry that points at a file which no longer
+exists is worse than one that works. Removing it properly means rewriting that
+registry, which is a separate job.
+
 ## Install
 
 1. Unzip it.
@@ -26,11 +36,27 @@ replaces it, and you can delete that folder.
 | doors | walks up and opens them normally when investigating, smashes through them when chasing |
 | traps | cameras, buckets, glue, vacuum cleaner, stock bear traps. No tomatoes |
 | voice | the Cat's scream, laugh and idle whistle |
+| keys | none. No F to shout, no headlamp |
 | music | the Cat's panic cue, every chase |
 
 Nothing of Foxy's is left on purpose: no Foxy sounds or animations, no
 jumpscare overlay, no camera flash, no "HEY", no headlamp stun, no nightmare
 mode, no 3500 speed.
+
+### How the hints and the F key were removed
+
+Six class references in the neighbour's graph are set to null:
+`WG_FshoutFR`, `WG_FshoutFR2`, `WG_Qlamp`, `WG_Qlamp2` (on-screen hints),
+`BP_KeyInputs` (the actor that binds F, Q, P and space) and `BP_HeadlampFR`.
+
+Each is an `EX_ObjectConst` holding a 4-byte class reference handed straight
+to `Create()` or `BeginDeferredActorSpawnFromClass()`. Writing a null index is
+the smallest possible change and is neutral both on disk and at runtime, so no
+jump target moves. Both callees handle a null class by design: `UWorld::
+SpawnActor` logs "SpawnActor failed because no class was specified" and
+returns NULL, `CreateWidget` logs "CreateWidget called with a null class" and
+returns nullptr, and the `AddToViewport` that follows sits behind an
+`EX_Context`, which skips itself when its object is null.
 
 ## Credits
 

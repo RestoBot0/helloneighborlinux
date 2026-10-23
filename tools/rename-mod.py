@@ -127,6 +127,12 @@ def getopt(name, default=None):
     return default
 
 
+def getopt_all(name):
+    """Every --name=VALUE on the command line, in order."""
+    flag = '--' + name + '='
+    return [a.split('=', 1)[1] for a in sys.argv[1:] if a.startswith(flag)]
+
+
 def rewrite_pak(path, old, new, dry=False):
     """Byte-swap the mod name throughout a pak and repair every hash."""
     pak = pp.load(path)
@@ -280,6 +286,23 @@ def main():
     print('pak      : %s' % os.path.basename(pak_new))
     rewrite_pak(pak_new, old, new)
 
+    # --- extra same-length swaps ----------------------------------------
+    # The plugin name is not the only thing the player sees. The Modding
+    # menu lists neighbours by asset name, so --swap lets the asset be
+    # renamed in the same pass, with the same length rule and the same
+    # hash repair.
+    pairs = [(old, new)]
+    for spec in getopt_all('swap'):
+        if '=' not in spec:
+            die('--swap needs OLD=NEW, got %r' % spec)
+        o2, n2 = spec.split('=', 1)
+        if len(o2) != len(n2):
+            die('--swap %s=%s: %d characters vs %d. They must match.'
+                % (o2, n2, len(o2), len(n2)))
+        print('swap     : %s -> %s  (%d characters)' % (o2, n2, len(o2)))
+        rewrite_pak(pak_new, o2, n2)
+        pairs.append((o2, n2))
+
     # --- verify ---------------------------------------------------------
     print('\nverifying...')
     pak = pp.load(pak_new)
@@ -299,7 +322,8 @@ def main():
                 bad.append(e['name'])
             if h['sha'] != e['sha']:
                 bad.append(e['name'] + ' (header)')
-            inside += blob.count(old.encode())
+            for o2, _ in pairs:
+                inside += blob.count(o2.encode())
             # re-walk the name table from scratch and check every hash
             try:
                 bounds = name_table_bounds(e['name'], blob)
@@ -320,7 +344,8 @@ def main():
         f.seek(pak['index_hash_at'])
         stored = f.read(20)
     ok_index = stored == hashlib.sha1(pak['index']).digest()
-    leftover = sum(1 for e in pak['entries'] if old.lower() in e['name'].lower())
+    leftover = sum(1 for e in pak['entries'] for o2, _ in pairs
+                   if o2.lower() in e['name'].lower())
 
     print('  content + header hashes : %s' % ('OK' if not bad else bad[:3]))
     print('  index hash              : %s' % ('OK' if ok_index else 'BAD'))
