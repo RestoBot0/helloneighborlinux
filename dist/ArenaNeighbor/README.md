@@ -4,9 +4,10 @@
 
 | file | state |
 |---|---|
-| **`ArenaNeighbor.zip`** | **1.5.** Always use this one - it tracks the newest good build. |
-| `ArenaNeighbor-1.5.zip` | identical to the above, kept so the version is explicit |
-| `ArenaNeighbor-1.6-catanim.zip` | **experiment, please test.** 1.5 with BP_Cat_hat's exact animation setup. May break anything played as a montage |
+| **`ArenaNeighbor.zip`** | **1.7.** Always use this one - it tracks the newest good build. |
+| `ArenaNeighbor-1.7.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.5.zip` | previous; scream was intermittent and the laugh never landed with it |
+| `ArenaNeighbor-1.6-catanim.zip` | the animation experiment on its own; 1.7 includes it |
 | `ArenaNeighbor-1.4.zip` | runs; scream works, but no laugh and no idle whistle |
 | `ArenaNeighbor-1.3.zip` | runs, Nightmare gone, but the catch is silent |
 | `ArenaNeighbor-1.2.zip` | confirmed running on hardware; still shows the Nightmare entry |
@@ -40,6 +41,21 @@ voice, referenced by name. `FoxyReignited` is not needed and can be deleted.
 `ScreamRandom.Play()` sits at raw 7769, gated on `AttackSound?` and followed
 immediately by `DisableMovement` - that is the catch.
 
+### Why the scream and the laugh never landed together
+
+They are on two different triggers and only one of them is reliable.
+
+The laugh is `DieSound`, which fires on every catch. The scream is
+`ScreamRandom.Play()` at raw 7769, which sits behind
+`JumpIfNot AttackSound?`. That flag is read in exactly one place - this gate -
+and the state machine writes it `True` in one branch and `False` in four
+others, so the scream only happened on some catches. That is the whole reason
+one or the other kept going missing between builds; the wiring never changed.
+
+All five writes are now `True`, so the scream is unconditional and the two
+start together. `EX_False` to `EX_True` is a single byte, identical on disk
+and at runtime.
+
 ### Why the idle whistle was silent
 
 `ReceiveBeginPlay` starts a looping timer on `CustomEvent` with an interval of
@@ -51,6 +67,19 @@ so while he was idle that `Play()` fired roughly ten times a second. Calling
 `Play` on an `AudioComponent` restarts it, so the whistle never got past its
 first few milliseconds and nothing was audible. Widening the range to 1-in-200
 gives about one whistle every ten seconds instead. Four bytes.
+
+### Why the catch animation cannot be fixed by settings alone
+
+`CATAnimBlueprint` does not reference `cat_grabbed_2` anywhere, and it has no
+Slot node, so the catch cannot be reaching the screen through the Cat's own
+AnimBP. Meanwhile Foxy's class **replaces** the base game's catch with its own
+sequence at raw 7744: scream, `DisableMovement`, a 0.3s delay, a 3s delay, and
+originally a full-screen widget. Foxy's jumpscare was a 2D image, not an
+animation, which is why no catch animation plays no matter what
+`Animations.Catch` is set to.
+
+Getting the original Cat catch back means stopping that sequence from
+hijacking it, which is a structural change rather than a constant tweak.
 
 ### What the original Cat mod actually does
 

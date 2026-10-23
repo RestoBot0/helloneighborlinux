@@ -494,6 +494,39 @@ def build(src, dst):
     log.append('  set      %-16s %7s -> %-6s %s'
                % ('music dice roll', '0..3', '2..2', 'it only fired 1 chase in 4'))
 
+    # ---- make the catch scream fire every time ---------------------------
+    # ScreamRandom.Play() - the catch scream - sits behind
+    # "JumpIfNot AttackSound?". That flag is read in exactly one place, this
+    # gate, and the state machine writes it True in one branch and False in
+    # four others, so the scream only happened on some catches.
+    #
+    # The laugh comes from DieSound, which fires on every catch. That is why
+    # the two never reliably landed together. Writing True in all five
+    # branches makes the scream unconditional, so both sounds start at the
+    # same moment - which is what cat_grabbed_2's two notifies do in the
+    # original mod.
+    #
+    # EX_False (0x28) -> EX_True (0x27) is one byte, identical on disk and at
+    # runtime, so nothing moves.
+    EX_FALSE, EX_TRUE = 0x28, 0x27
+    want = bytes([EX_INSTANCE_VARIABLE]) + struct.pack('<i', prop_index('AttackSound?'))
+    flipped = 0
+    at = 0
+    while True:
+        at = code.find(want, at)
+        if at < 0:
+            break
+        tail = at + len(want)
+        if code[tail] == EX_FALSE:
+            ed.pending.append((uber['off'] + uhdr + tail, '<B', EX_TRUE))
+            flipped += 1
+        at += 1
+    if flipped != 4:
+        raise SystemExit('expected 4 AttackSound? = False writes, found %d' % flipped)
+    log.append('catch scream')
+    log.append('  set      %-16s %7s -> %-6s %s'
+               % ('AttackSound?', 'False x4', 'True', 'it only screamed on some catches'))
+
     # ---- stop the idle noise retriggering itself into silence ------------
     # ReceiveBeginPlay starts a looping timer on CustomEvent with a 0.05s
     # interval - twenty ticks a second - and the idle block lives inside it:
