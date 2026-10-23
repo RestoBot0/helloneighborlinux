@@ -227,13 +227,25 @@ def build(src, dst):
     mesh = walk(a, data, e['off'], e['off'] + e['size'])
     log.append('CharacterMesh0')
     set_ref(prop(mesh, 'SkeletalMesh'), cat_rig, 'Cat_in_the_hat_rig')
-    if CAT_ANIMBP:
-        # BP_Cat_hat does not override AnimClass at all - it only sets
-        # Animations.BaseBlueprintClass and lets the game apply it.
-        kill_tag(prop(mesh, 'AnimClass'), 'BP_Cat_hat does not set this')
-    else:
-        set_ref(prop(mesh, 'AnimClass'), sosed_abp,
-                'SosedAnimBlueprint_C  (has a DefaultSlot; CATAnimBlueprint does not)')
+    # NEVER set AnimClass here. Neither BP_Sosed nor BP_Cat_hat does - both
+    # leave the component alone and let the game apply
+    # Animations.BaseBlueprintClass itself. Overriding it is what stopped the
+    # catch montage running at all:
+    #
+    #   1.5      BaseBlueprintClass Sosed + AnimClass Sosed -> montage never
+    #            played, so neither of cat_grabbed_2's notifies was heard
+    #   1.6-1.8  BaseBlueprintClass CAT   + no AnimClass    -> montage played
+    #            (the laugh was heard) but CATAnimBlueprint has no Slot node,
+    #            so the pose was discarded and nothing was visible
+    #
+    # A montage with no matching Slot still runs its timeline and still fires
+    # its notifies; only the pose is thrown away. That is why sound appeared
+    # without animation. The fix is the pairing neither build had: the stock
+    # Neighbour AnimBP, which does have a Slot, applied the way the base game
+    # applies it.
+    kill_tag(prop(mesh, 'AnimClass'),
+             'neither BP_Sosed nor BP_Cat_hat sets this; setting it stopped '
+             'the catch montage')
     # Foxy nudges the mesh 10cm back and 5.5cm right to line his own model up
     # with the capsule. On the Cat that just desyncs the body from its
     # collision - "the hitbox is different". BP_Cat_hat sets nothing here.

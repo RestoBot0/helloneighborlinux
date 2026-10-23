@@ -4,8 +4,9 @@
 
 | file | state |
 |---|---|
-| **`ArenaNeighbor.zip`** | **1.9.** Always use this one - it tracks the newest good build. |
-| `ArenaNeighbor-1.9.zip` | identical to the above, kept so the version is explicit |
+| **`ArenaNeighbor.zip`** | **1.10.** Always use this one - it tracks the newest good build. |
+| `ArenaNeighbor-1.10.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.9.zip` | scream restored, but still overrode AnimClass so the catch montage never ran |
 | `ArenaNeighbor-1.8.zip` | **do not use** - zeroing the catch delays killed the scream |
 | `ArenaNeighbor-1.7.zip` | scream worked, grab still used the base game's animation |
 | `ArenaNeighbor-1.5.zip` | previous; scream was intermittent and the laugh never landed with it |
@@ -100,6 +101,35 @@ before them, and with no delay the sequence runs straight on into the state
 change that stops the audio, so the sound is cut before it is audible.
 
 Restored to 0.3 and 3.0.
+
+### Why the catch animation never appeared - the whole chain
+
+Settled with the base game's own `BP_Sosed.uasset`, which is in `incoming/`.
+
+1. `AI_Foxy_Original_C` and `BP_Cat_hat_C` are **both children of
+   `BP_Sosed_C`**, whose own parent is the C++ class `Sosed`.
+2. `BP_Sosed`'s Blueprint graph contains **no catch code at all** - no
+   `PlayAnimMontage`, no reference to `Catch`, `Choke` or `grabbed`. The catch
+   is pure C++ reading the `Animations` struct. Both mods inherit the same
+   code.
+3. So the catch was never Foxy's sequence hijacking anything. It was the
+   `Animations` struct and the AnimBP.
+4. A montage whose Slot is missing from the AnimGraph **still plays** - the
+   timeline runs and the notifies fire - and only the pose is discarded. This
+   is standard engine behaviour and is why sound appeared without animation.
+
+That explains every build:
+
+| build | `BaseBlueprintClass` | `CharacterMesh0.AnimClass` | result |
+|---|---|---|---|
+| 1.5 | Sosed | **Sosed (overridden)** | montage never ran - no laugh, no animation |
+| 1.6-1.8 | CATAnimBlueprint | not set | montage ran, laugh heard, **no Slot so no pose** |
+| 1.9 | Sosed | **Sosed (overridden)** | same as 1.5 |
+| **1.10** | **Sosed** | **not set** | montage runs *and* has a Slot to render into |
+
+Neither `BP_Sosed` nor `BP_Cat_hat` sets `AnimClass` on the mesh - both leave
+it alone and let the game apply `Animations.BaseBlueprintClass`. Overriding it
+was mine, and it is what stopped the montage running. 1.10 removes it.
 
 ### The AnimBP and the grab fields have to be fixed together
 
