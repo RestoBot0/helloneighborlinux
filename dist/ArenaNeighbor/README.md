@@ -4,9 +4,10 @@
 
 | file | state |
 |---|---|
-| **`ArenaNeighbor.zip`** | **1.8.** Always use this one - it tracks the newest good build. |
-| `ArenaNeighbor-1.8.zip` | identical to the above, kept so the version is explicit |
-| `ArenaNeighbor-1.7.zip` | previous; grab still used the base game's animation |
+| **`ArenaNeighbor.zip`** | **1.9.** Always use this one - it tracks the newest good build. |
+| `ArenaNeighbor-1.9.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.8.zip` | **do not use** - zeroing the catch delays killed the scream |
+| `ArenaNeighbor-1.7.zip` | scream worked, grab still used the base game's animation |
 | `ArenaNeighbor-1.5.zip` | previous; scream was intermittent and the laugh never landed with it |
 | `ArenaNeighbor-1.6-catanim.zip` | the animation experiment on its own; 1.7 includes it |
 | `ArenaNeighbor-1.4.zip` | runs; scream works, but no laugh and no idle whistle |
@@ -90,11 +91,31 @@ That also settles the sound: `cat_grabbed_2` carries both
 `AnimNotify_PlaySound` entries, the scream and the laugh, so playing it starts
 them together exactly as the original mod does.
 
-### No delay on the catch
+### The catch delays are load-bearing - do not zero them
 
-After `DisableMovement` the sequence waited 0.3s and then 3s. Those existed to
-hold Foxy's full-screen jumpscare image, which is gone, so they had become a
-dead freeze where nothing happened. Both are now 0.
+1.8 set the 0.3s and 3s delays after `DisableMovement` to 0, on the reasoning
+that they only existed to hold Foxy's full-screen jumpscare image. That killed
+the scream, confirmed on hardware. `ScreamRandom.Play()` happens immediately
+before them, and with no delay the sequence runs straight on into the state
+change that stops the audio, so the sound is cut before it is audible.
+
+Restored to 0.3 and 3.0.
+
+### The AnimBP and the grab fields have to be fixed together
+
+Three combinations have now been tried:
+
+| build | AnimBP | grab fields | result |
+|---|---|---|---|
+| 1.5 | stock Neighbour | `Catch` only | no grab animation |
+| 1.6-1.8 | `CATAnimBlueprint` | 1.8 added `Choke`, `BedLookTake` | no grab animation |
+| **1.9** | **stock Neighbour** | **all three** | **untested** |
+
+`CATAnimBlueprint` has no Slot node and never references `cat_grabbed_2`, so
+nothing played as a montage can render through it. The stock Neighbour AnimBP
+does have the slot. 1.9 is the one pairing that had never been built: the
+AnimBP that can render a montage, together with all three grab fields
+pointing at the Cat's animation.
 
 ### What the original Cat mod actually does
 

@@ -503,26 +503,12 @@ def build(src, dst):
     log.append('  set      %-16s %7s -> %-6s %s'
                % ('music dice roll', '0..3', '2..2', 'it only fired 1 chase in 4'))
 
-    # ---- take the delays out of the catch --------------------------------
-    # After DisableMovement the catch waits 0.3s and then 3s. Those exist to
-    # hold Foxy's full-screen jumpscare image on screen, and that image is
-    # gone, so they are now a dead freeze where nothing happens. Both are
-    # 4-byte float constants.
-    EX_FLOAT = 0x1E
-    anchor_at = find_once(bytes([0x1B]) +
-                          struct.pack('<ii', ed.add_name('DisableMovement'), 0),
-                          'DisableMovement')
-    window = code[anchor_at:anchor_at + 200]
-    for old_secs in (0.3, 3.0):
-        pat = bytes([EX_FLOAT]) + struct.pack('<f', old_secs)
-        if window.count(pat) != 1:
-            raise SystemExit('catch delay %ss: found %d in the window'
-                             % (old_secs, window.count(pat)))
-        ed.pending.append((uber['off'] + uhdr + anchor_at + window.find(pat) + 1,
-                           '<f', 0.0))
-        log.append('  set      %-16s %7s -> %-6s %s'
-                   % ('catch delay', '%ss' % old_secs, '0s',
-                      'it was holding a jumpscare image that no longer exists'))
+    # ---- DO NOT zero the catch delays ------------------------------------
+    # 1.8 set the 0.3s and 3s delays after DisableMovement to 0. That killed
+    # the scream, confirmed on hardware: ScreamRandom.Play() happens just
+    # before them, and with no delay the sequence runs straight on into the
+    # state change that stops the audio, so the sound is cut before it is
+    # audible. The delays are load-bearing for the scream. Leave them.
 
     # ---- make the catch scream fire every time ---------------------------
     # ScreamRandom.Play() - the catch scream - sits behind
