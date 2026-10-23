@@ -166,6 +166,15 @@ def build(src, dst):
     whistle = add_asset(CAT + '/Sounds/Cat_Whistling_Bored_Talking_Cue', 'SoundCue',
                         'Cat_Whistling_Bored_Talking_Cue')
     secret = add_asset(CAT + '/Sounds/secretsound_Cue', 'SoundCue', 'secretsound_Cue')
+    cake = add_asset(CAT + '/Sounds/pieceofcake_Cue', 'SoundCue', 'pieceofcake_Cue')
+    # cat_grabbed_2 carries two AnimNotify_PlaySound entries: the scream and
+    # the laugh that overlays it. Both are wired to components below so that
+    # neither depends on that animation actually playing - and it does not.
+    # The scream ships as a bare SoundWave rather than a Cue, which is still
+    # a USoundBase and assigns fine.
+    scream = add_asset(CAT + '/Sounds/ignited-bonnie-jumpscare-remake', 'SoundWave',
+                       'ignited-bonnie-jumpscare-remake')
+    laugh = add_asset(CAT + '/Sounds/jump_Cue', 'SoundCue', 'jump_Cue')
 
     # The Cat's whole voice lives in AnimNotifies inside its animations, so the
     # only way to hear it is to put those animations into the Animations struct:
@@ -286,6 +295,11 @@ def build(src, dst):
     for comp, idx, what in (
         ('attack_sound_GEN_VARIABLE', panic, 'Cat panic_Cue (chase music)'),
         ('Audio_GEN_VARIABLE', whistle, 'Cat_Whistling_Bored_Talking_Cue (idle)'),
+        # ScreamRandom.Play() is gated on AttackSound? and followed straight
+        # away by DisableMovement - that is the catch. It was still Foxy's.
+        ('ScreamRandom_GEN_VARIABLE', scream, "the Cat's jumpscare scream"),
+        # Audio2.Play() is the noise on spotting the player. Also still Foxy's.
+        ('Audio2_GEN_VARIABLE', cake, 'Cat pieceofcake_Cue (when he spots you)'),
     ):
         e = find_export(a, comp)
         ps = walk(a, data, e['off'], e['off'] + e['size'])
@@ -375,37 +389,41 @@ def build(src, dst):
             raise SystemExit('%s: pattern matched %d times' % (what, len(hits)))
         return hits[0]
 
-    # ---- take away the things nobody asked for --------------------------
-    # The mod puts hint widgets on screen and spawns an actor that binds F,
-    # Q, P and space. F plays "HEY" and yanks the neighbour's state; the
-    # others drive the nightmare-mode headlamp. None of that was wanted.
+    # ---- give the catch its second sound --------------------------------
+    # The mod silences the base game's catch sound: inside the BP_Human block
+    # it writes DieSound = Clear_Cue, because Foxy's jumpscare brought its own
+    # audio through a widget that is now gone.
     #
-    # Each one is an EX_ObjectConst (0x20) holding a 4-byte class reference,
-    # passed straight to Create() or BeginDeferredActorSpawnFromClass().
-    # Writing a null index is the smallest possible change and is neutral on
-    # disk and at runtime, so no jump target moves.
+    # The scream is already on ScreamRandom above, so this slot gets the other
+    # half - the laugh that overlays it. Together they reproduce what
+    # cat_grabbed_2's two notifies would have played.
     #
-    # Both callees are documented to cope with a null class:
-    #   UWorld::SpawnActor  -> "SpawnActor failed because no class was
-    #                           specified", returns NULL
-    #   CreateWidget        -> "CreateWidget called with a null class",
-    #                           returns nullptr
-    # and the AddToViewport that follows sits behind EX_Context, which skips
-    # itself when its object is null.
-    EX_OBJECT_CONST = 0x20
-    log.append('things that were never asked for')
-    for cls, why in (
-            ('WG_FshoutFR_C',   'the "press F to shout" hint'),
-            ('WG_FshoutFR2_C',  'the same hint, nightmare version'),
-            ('WG_Qlamp_C',      'a headlamp hint'),
-            ('WG_Qlamp2_C',     'a headlamp hint'),
-            ('BP_KeyInputs_C',  'the F / Q / P / space key handler'),
-            ('BP_HeadlampFR_C', 'the headlamp itself'),
-    ):
-        at = find_once(bytes([EX_OBJECT_CONST]) +
-                       struct.pack('<i', prop_index(cls)), cls)
-        ed.pending.append((uber['off'] + uhdr + at + 1, '<i', 0))
-        log.append('  drop     %-18s %s' % (cls, why))
+    # Four "ObjectConst Clear_Cue" exist in the graph, so this one is found
+    # through the DieSound property reference rather than by searching for the
+    # constant; the three SosedNearSound mutes must stay as they are.
+    EX_INSTANCE_VARIABLE = 0x01
+    at = find_once(bytes([EX_INSTANCE_VARIABLE]) +
+                   struct.pack('<i', prop_index('DieSound')), 'DieSound')
+    if code[at + 5] != 0x20:
+        raise SystemExit('expected an ObjectConst right after DieSound')
+    ed.pending.append((uber['off'] + uhdr + at + 6, '<i', laugh))
+    log.append('catch sound')
+    log.append("  point    DieSound         -> Cat jump_Cue, the laugh that "
+               'overlays the scream (was silence)')
+
+    # ---- DO NOT null these class references ------------------------------
+    # Build 1.1 set six EX_ObjectConst class references to null to remove the
+    # F-key "HEY" shout, its hint, the headlamp and the headlamp hints:
+    # WG_FshoutFR, WG_FshoutFR2, WG_Qlamp, WG_Qlamp2, BP_KeyInputs and
+    # BP_HeadlampFR. It froze the game on load, confirmed on hardware, and a
+    # diff against 1.0 showed those 24 bytes were the only real difference.
+    #
+    # BP_KeyInputs is the likely one: it is not only the key binding, it also
+    # calls EnableInput on the player controller and drives the neighbour's
+    # state, and the mod ships an intro sequence. Never spawning it appears to
+    # leave that intro waiting forever.
+    #
+    # If retried, do it one pointer at a time with a test between each.
 
     # ---- let the base game be heard again -------------------------------
     # Both BP_Human_C casts are kept alive (see BLOCKS above). Those two
@@ -454,6 +472,29 @@ def build(src, dst):
     log.append('attack state')
     log.append('  set      %-16s %7s -> %-6s %s'
                % ('music dice roll', '0..3', '2..2', 'it only fired 1 chase in 4'))
+
+    # ---- stop the idle noise retriggering itself into silence ------------
+    # ReceiveBeginPlay starts a looping timer on CustomEvent with a 0.05s
+    # interval - twenty ticks a second - and the idle block lives inside it:
+    #
+    #     if Idle?  and  RandomIntegerInRange(1, 2) == 1:  Audio.Play(0.0)
+    #
+    # so while he is idle that Play() fires about ten times a second. Calling
+    # Play on an AudioComponent restarts it, so the whistle never gets past
+    # its first few milliseconds and you hear nothing at all.
+    #
+    # Widening the range is the whole fix: at 20 ticks a second, 1-in-200
+    # works out to roughly one whistle every ten seconds. Four bytes, so the
+    # bytecode does not move.
+    IDLE_ODDS = 200
+    idle_roll = (bytes([0x68]) + struct.pack('<i', prop_index('RandomIntegerInRange'))
+                 + bytes([EX_INT]) + struct.pack('<i', 1)
+                 + bytes([EX_INT]) + struct.pack('<i', 2))
+    at = find_once(idle_roll, 'idle-noise dice roll')
+    ed.pending.append((uber['off'] + uhdr + at + 10 + 1, '<i', IDLE_ODDS))
+    log.append('  set      %-16s %7s -> %-6s %s'
+               % ('idle noise roll', '1..2', '1..%d' % IDLE_ODDS,
+                  'it was restarting the whistle 10x a second'))
 
     # ---- blank the jumpscare -------------------------------------------
     e = find_export(a, 'Jumpscared')
