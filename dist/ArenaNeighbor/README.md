@@ -4,9 +4,9 @@
 
 | file | state |
 |---|---|
-| **`ArenaNeighbor.zip`** | **1.0. Known to run.** This is the one to use. |
-| `ArenaNeighbor-1.0.zip` | identical to the above, kept so the version is explicit |
-| `ArenaNeighbor-1.2.zip` | 1.0 plus a rename, so the Modding menu says `AI_ArenaNeighbor` instead of `AI_Foxy_Original`. **Not yet run on hardware.** |
+| **`ArenaNeighbor.zip`** | **1.2. Confirmed running on hardware.** Use this one. |
+| `ArenaNeighbor-1.2.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.0.zip` | the previous build. Also runs, but the Modding menu calls him `AI_Foxy_Original` |
 
 1.1 froze the game on load and has been removed. Its only real difference
 from 1.0 was 24 bytes: six nulled class references that took away the F-key
@@ -26,6 +26,7 @@ voice, referenced by name. `FoxyReignited` is not needed and can be deleted.
 
 ## What works (confirmed on hardware)
 
+- the Modding menu names him `AI_ArenaNeighbor` (1.2)
 - the Cat in the Hat as the Neighbour, with working sight
 - chase speed 5500, walking and investigating 600
 - doors broken through while chasing
@@ -34,7 +35,8 @@ voice, referenced by name. `FoxyReignited` is not needed and can be deleted.
 
 ## Known, not fixed
 
-- the Modding menu lists him as `AI_Foxy_Original` (1.2 addresses this, untested)
+- a fullscreen problem when starting a game with the mod. Present in 1.2;
+  not yet traced
 - a second entry, `AI_Foxy_Nightmare`, sits above him. Deleting the asset is
   not enough on its own - it is also listed in the mod's `AssetRegistry.bin`,
   and a menu entry pointing at a missing file is worse than one that works
