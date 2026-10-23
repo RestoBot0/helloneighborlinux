@@ -4,8 +4,9 @@
 
 | file | state |
 |---|---|
-| **`ArenaNeighbor.zip`** | **1.2. Confirmed running on hardware.** Use this one. |
-| `ArenaNeighbor-1.2.zip` | identical to the above, kept so the version is explicit |
+| **`ArenaNeighbor.zip`** | **1.3.** Use this one. 1.2 plus the Nightmare entry removed from the mod's asset list. |
+| `ArenaNeighbor-1.3.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.2.zip` | confirmed running on hardware; still shows the Nightmare entry |
 | `ArenaNeighbor-1.0.zip` | the previous build. Also runs, but the Modding menu calls him `AI_Foxy_Original` |
 
 1.1 froze the game on load and has been removed. Its only real difference
@@ -37,9 +38,10 @@ voice, referenced by name. `FoxyReignited` is not needed and can be deleted.
 
 - a fullscreen problem when starting a game with the mod. Present in 1.2;
   not yet traced
-- a second entry, `AI_Foxy_Nightmare`, sits above him. Deleting the asset is
-  not enough on its own - it is also listed in the mod's `AssetRegistry.bin`,
-  and a menu entry pointing at a missing file is worse than one that works
+- the Nightmare entry: addressed in 1.3 by removing its record from
+  `AssetRegistry.bin` rather than deleting the asset. The file stays, so the
+  ten other packages that import that class still resolve. If the menu is not
+  built from the registry this changes nothing and breaks nothing
 - F still shouts "HEY" and shows a hint
 - no catch animation or sound
 
