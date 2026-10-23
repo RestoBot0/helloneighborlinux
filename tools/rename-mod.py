@@ -50,6 +50,66 @@ _spec = importlib.util.spec_from_file_location('pp', os.path.join(HERE, 'patch-p
 pp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pp)
 
+_spec = importlib.util.spec_from_file_location('ue', os.path.join(HERE, 'uasset_edit.py'))
+ue = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ue)
+
+from uasset import Asset
+
+# Every name in a cooked package and in an AssetRegistry.bin is stored as
+# <int32 length><chars + NUL><uint16 Strihash><uint16 StrCrc32>. Swapping the
+# text leaves those two hashes describing the old string. Epic's own docs say
+# they are "not used anymore but recalculated on save", i.e. ignored on load,
+# so a stale pair is survivable - but there is no reason to ship a file whose
+# own checksums disagree with its contents, and getting them right lets the
+# verify pass below prove the table was walked correctly.
+REGISTRY_GUID = bytes.fromhex('e79e7f713a49b0e93291b3880781381b')
+
+
+def _name_table_at(blob, off, count):
+    """Yield (hash_offset, string) for each entry. Raises on a bad walk."""
+    p = off
+    for _ in range(count):
+        ln = struct.unpack_from('<i', blob, p)[0]
+        p += 4
+        if ln < 0:                      # UTF-16, cannot contain our ASCII name
+            p += -ln * 2
+        else:
+            yield p + ln, blob[p:p + ln - 1].decode('latin1')
+            p += ln
+        p += 4                          # the two uint16 hashes
+    if p != len(blob) and off > 0 and count and p > len(blob):
+        die('name table walk ran past the end of the buffer')
+
+
+def name_table_bounds(name, blob):
+    """(offset, count) of the FName table, or None if this file has none."""
+    if name.endswith(('.uasset', '.umap')):
+        a = Asset(blob)
+        return a.name_offset, a.name_count
+    if blob[:16] == REGISTRY_GUID:
+        off = struct.unpack_from('<q', blob, 20)[0]
+        return off + 4, struct.unpack_from('<i', blob, off)[0]
+    return None
+
+
+def refresh_name_hashes(name, blob):
+    """Recompute both FName hashes in place. Returns (blob, fixed, total)."""
+    bounds = name_table_bounds(name, blob)
+    if bounds is None:
+        return blob, 0, 0
+    off, count = bounds
+    buf = bytearray(blob)
+    fixed = total = 0
+    for hash_at, text in _name_table_at(blob, off, count):
+        total += 1
+        want = struct.pack('<HH', ue.strihash(text) & 0xFFFF,
+                           ue.strcrc32(text) & 0xFFFF)
+        if buf[hash_at:hash_at + 4] != want:
+            buf[hash_at:hash_at + 4] = want
+            fixed += 1
+    return bytes(buf), fixed, total
+
 
 def die(msg):
     sys.stderr.write('error: %s\n' % msg)
@@ -77,6 +137,7 @@ def rewrite_pak(path, old, new, dry=False):
 
     total = 0
     touched = 0
+    rehashed = [0, 0]
     index = bytearray(pak['index'])
 
     for e in pak['entries']:
@@ -97,6 +158,9 @@ def rewrite_pak(path, old, new, dry=False):
         touched += 1
         if dry:
             continue
+        newblob, fixed, seen = refresh_name_hashes(e['name'], newblob)
+        rehashed[0] += fixed
+        rehashed[1] += seen
         raw[start:start + e['size']] = newblob
         sha = hashlib.sha1(newblob).digest()
         # the entry header repeats the record just before the data
@@ -112,6 +176,8 @@ def rewrite_pak(path, old, new, dry=False):
 
     print('    %d occurrences in %d of %d files, %d in the file list'
           % (total, touched, len(pak['entries']), idx_hits))
+    if not dry:
+        print('    %d of %d name hashes recomputed' % tuple(rehashed))
     if dry:
         return total + idx_hits
 
@@ -218,16 +284,39 @@ def main():
     print('\nverifying...')
     pak = pp.load(pak_new)
     bad = []
+    stale = 0
+    names_checked = 0
+    inside = 0
+    unparsed = []
     with open(pak_new, 'rb') as f:
         for e in pak['entries']:
             f.seek(e['offset'])
             hr = pp.Reader(f.read(256))
             h = pp.read_entry(hr, pak['version'])
             f.seek(e['offset'] + hr.o)
-            if hashlib.sha1(f.read(e['size'])).digest() != e['sha']:
+            blob = f.read(e['size'])
+            if hashlib.sha1(blob).digest() != e['sha']:
                 bad.append(e['name'])
             if h['sha'] != e['sha']:
                 bad.append(e['name'] + ' (header)')
+            inside += blob.count(old.encode())
+            # re-walk the name table from scratch and check every hash
+            try:
+                bounds = name_table_bounds(e['name'], blob)
+            except Exception:
+                unparsed.append(e['name'])
+                continue
+            if bounds is None:
+                continue
+            try:
+                for hash_at, text in _name_table_at(blob, bounds[0], bounds[1]):
+                    names_checked += 1
+                    want = struct.pack('<HH', ue.strihash(text) & 0xFFFF,
+                                       ue.strcrc32(text) & 0xFFFF)
+                    if blob[hash_at:hash_at + 4] != want:
+                        stale += 1
+            except Exception:
+                unparsed.append(e['name'])
         f.seek(pak['index_hash_at'])
         stored = f.read(20)
     ok_index = stored == hashlib.sha1(pak['index']).digest()
@@ -235,9 +324,12 @@ def main():
 
     print('  content + header hashes : %s' % ('OK' if not bad else bad[:3]))
     print('  index hash              : %s' % ('OK' if ok_index else 'BAD'))
-    print('  paths still saying %-5s: %d' % (old[:5], leftover))
+    print('  name tables re-walked   : %d names, %d stale hashes, %d unreadable'
+          % (names_checked, stale, len(unparsed)))
+    print('  paths still saying %-5s : %d' % (old[:5], leftover))
+    print('  %-5s left inside files : %d' % (old[:5], inside))
     print('  size                    : %d bytes' % os.path.getsize(pak_new))
-    if bad or not ok_index or leftover:
+    if bad or not ok_index or leftover or stale or inside or unparsed:
         die('verification failed - do not install this')
     print('\nDone. Drop this folder into HelloNeighbor/Mods/')
 
