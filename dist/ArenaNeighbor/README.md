@@ -6,6 +6,7 @@
 |---|---|
 | **`ArenaNeighbor.zip`** | **1.5.** Always use this one - it tracks the newest good build. |
 | `ArenaNeighbor-1.5.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.6-catanim.zip` | **experiment, please test.** 1.5 with BP_Cat_hat's exact animation setup. May break anything played as a montage |
 | `ArenaNeighbor-1.4.zip` | runs; scream works, but no laugh and no idle whistle |
 | `ArenaNeighbor-1.3.zip` | runs, Nightmare gone, but the catch is silent |
 | `ArenaNeighbor-1.2.zip` | confirmed running on hardware; still shows the Nightmare entry |
@@ -51,17 +52,37 @@ so while he was idle that `Play()` fired roughly ten times a second. Calling
 first few milliseconds and nothing was audible. Widening the range to 1-in-200
 gives about one whistle every ten seconds instead. Four bytes.
 
-### The Cat's animations are not playing
+### What the original Cat mod actually does
 
-`Animations.Catch` is `cat_grabbed_2` and `Animations.LookAround` is
-`Cat_Anim_rig_LookAround`, yet neither of their `AnimNotify_PlaySound` entries
-is ever heard - while the base game's own jump grunt, which is also a notify,
-is. Notifies work; those animations are simply not being used. That is why
-every Cat sound here is wired to an audio component instead.
+Taken apart in full. `BP_Cat_hat` has **no bytecode at all** - not one function
+with code. It is a pure data Blueprint, so everything the Cat does is the base
+game's own neighbour behaviour driven by what it sets:
 
-The jump grunt is not something this build introduced: `BP_Cat_hat` in the
-original Cat mod has no `Jump_Start` or `Jump_Loop` override either, so it
-inherits the base game's jump animation and grunt exactly the same way.
+| | |
+|---|---|
+| `Animations.BaseBlueprintClass` | `CATAnimBlueprint_C` |
+| `Animations` | Fall, PlayerInHome, Catch, BedLookStart, SlipAndFall, LookAround, Afraid |
+| `Sounds` | Sleep `neighbor_snore_1_Cue`, StepSound `sosed_steps` |
+| `attack_sound.Sound` | `panic_Cue` |
+| `SoundStruck` | `secretsound_Cue` |
+| speeds | 600 / 600 / 5500 |
+| jumping | `JumpMaxHoldTime` 0.5, `JumpMaxCount` 3 |
+| `CharacterMesh0` | `SkeletalMesh` and `AttachParent` only - **it never sets `AnimClass`** |
+
+That last row is the important one. The Cat mod leaves the mesh's AnimClass
+alone and lets the game apply `Animations.BaseBlueprintClass`. This build
+forces `SosedAnimBlueprint_C` into both, because `CATAnimBlueprint` has no
+Slot node - there is no `AnimNode_Slot` and no name containing "Slot" except
+`SlotIndex` - so anything played as a montage renders nothing through it.
+
+`-catanim` reproduces the Cat mod's setup exactly, to find out whether the
+catch animation depends on it. Build it with
+`catbody-build.py in.uasset out.uasset --cat-animbp`.
+
+The jump grunt is not something this build introduced: `BP_Cat_hat` has no
+`Jump_Start` or `Jump_Loop` override either, so it inherits the base game's
+jump animation and grunt the same way - and it sets `JumpMaxCount` to 3, so
+the Cat jumps a lot.
 
 ## What works (confirmed on hardware)
 
@@ -75,9 +96,12 @@ inherits the base game's jump animation and grunt exactly the same way.
 
 ## Known, not fixed
 
-- the Cat's own animations do not play; the base game's are used instead.
-  Every Cat sound is therefore wired to an audio component rather than left
-  to an anim notify
+- the catch animation does not play, so the laugh baked into `cat_grabbed_2`
+  as its second notify is never heard. `LookAround` does play, so animations
+  in general are fine - it is the catch specifically. `-catanim` is the test
+  for whether the Cat's own AnimBP is what the catch needs
+- `DieSound` is not the catch sound. Pointing it at the laugh in 1.5 changed
+  nothing, so getting caught does not go through it
 - the neighbour's jump grunt is the base game's. The original Cat mod has
   this too - it does not override the jump animations either
 - F still shouts "HEY" and shows a hint. Removing it froze the game in 1.1

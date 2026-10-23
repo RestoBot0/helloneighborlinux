@@ -148,6 +148,9 @@ def prop(props, name):
 
 
 # -------------------------------------------------------------------- build
+CAT_ANIMBP = '--cat-animbp' in sys.argv
+
+
 def build(src, dst):
     data = open(src, 'rb').read()
     a = Asset(data)
@@ -162,6 +165,18 @@ def build(src, dst):
     cat_rig = add_asset(CAT + '/Cat_in_the_hat_rig', 'SkeletalMesh', 'Cat_in_the_hat_rig')
     sosed_abp = add_asset(SOSED + '/SosedAnimBlueprint', 'AnimBlueprintGeneratedClass',
                           'SosedAnimBlueprint_C')
+    cat_abp = add_asset(CAT + '/anims/CATAnimBlueprint', 'AnimBlueprintGeneratedClass',
+                        'CATAnimBlueprint_C')
+    sosed_idle = add_asset(SOSED + '/Animations/neighbour_lowpoly_Anim_rig_Idle',
+                           'AnimSequence', 'neighbour_lowpoly_Anim_rig_Idle')
+    # --cat-animbp reproduces BP_Cat_hat exactly: it sets
+    # Animations.BaseBlueprintClass to CATAnimBlueprint_C and does NOT touch
+    # the mesh's AnimClass at all. The trade-off is that CATAnimBlueprint has
+    # no Slot node - checked, there is no AnimNode_Slot and no name
+    # containing "Slot" except SlotIndex - so anything played as a montage
+    # renders nothing through it. That is why the default build uses the
+    # stock Neighbour AnimBP instead.
+    anim_bp = cat_abp if CAT_ANIMBP else sosed_abp
     panic = add_asset(CAT + '/Sounds/panic_Cue', 'SoundCue', 'panic_Cue')
     whistle = add_asset(CAT + '/Sounds/Cat_Whistling_Bored_Talking_Cue', 'SoundCue',
                         'Cat_Whistling_Bored_Talking_Cue')
@@ -212,8 +227,13 @@ def build(src, dst):
     mesh = walk(a, data, e['off'], e['off'] + e['size'])
     log.append('CharacterMesh0')
     set_ref(prop(mesh, 'SkeletalMesh'), cat_rig, 'Cat_in_the_hat_rig')
-    set_ref(prop(mesh, 'AnimClass'), sosed_abp,
-            'SosedAnimBlueprint_C  (has a DefaultSlot; CATAnimBlueprint does not)')
+    if CAT_ANIMBP:
+        # BP_Cat_hat does not override AnimClass at all - it only sets
+        # Animations.BaseBlueprintClass and lets the game apply it.
+        kill_tag(prop(mesh, 'AnimClass'), 'BP_Cat_hat does not set this')
+    else:
+        set_ref(prop(mesh, 'AnimClass'), sosed_abp,
+                'SosedAnimBlueprint_C  (has a DefaultSlot; CATAnimBlueprint does not)')
     # Foxy nudges the mesh 10cm back and 5.5cm right to line his own model up
     # with the capsule. On the Cat that just desyncs the body from its
     # collision - "the hitbox is different". BP_Cat_hat sets nothing here.
@@ -268,7 +288,7 @@ def build(src, dst):
     anims = prop(cdo, 'Animations')
     inner = walk(a, data, anims['vstart'], anims['vstart'] + anims['size'])
     use = {
-        'BaseBlueprintClass': (sosed_abp, 'SosedAnimBlueprint_C'),
+        'BaseBlueprintClass': (anim_bp, 'CATAnimBlueprint_C' if CAT_ANIMBP else 'SosedAnimBlueprint_C'),
         'Fall': (cat_anim['Cat_Anim_rig_fall_run'], 'Cat_Anim_rig_fall_run'),
         'SlipAndFall': (cat_anim['Cat_Anim_rig_fall_run'], 'Cat_Anim_rig_fall_run'),
         'Catch': (cat_anim['cat_grabbed_2'], 'cat_grabbed_2  (the scream)'),
@@ -276,7 +296,8 @@ def build(src, dst):
                          'cat_lookunder_bed_start  (the laugh)'),
         'LookAround': (cat_anim['Cat_Anim_rig_LookAround'],
                        'Cat_Anim_rig_LookAround  (the idle whistle)'),
-        'Afraid': (cat_anim['Cat_Anim_rig_spotted'], 'Cat_Anim_rig_spotted'),
+        'Afraid': ((sosed_idle, 'neighbour_lowpoly_Anim_rig_Idle') if CAT_ANIMBP
+                   else (cat_anim['Cat_Anim_rig_spotted'], 'Cat_Anim_rig_spotted')),
     }
     log.append('Animations')
     for p in inner:
@@ -558,6 +579,9 @@ def build(src, dst):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
+    args = [x for x in sys.argv[1:] if not x.startswith('--')]
+    if len(args) != 2:
         raise SystemExit(__doc__.strip().splitlines()[-1])
-    build(sys.argv[1], sys.argv[2])
+    if CAT_ANIMBP:
+        print('--cat-animbp: reproducing BP_Cat_hat\'s animation setup exactly')
+    build(args[0], args[1])
