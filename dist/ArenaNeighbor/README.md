@@ -4,8 +4,9 @@
 
 | file | state |
 |---|---|
-| **`ArenaNeighbor.zip`** | **1.7.** Always use this one - it tracks the newest good build. |
-| `ArenaNeighbor-1.7.zip` | identical to the above, kept so the version is explicit |
+| **`ArenaNeighbor.zip`** | **1.8.** Always use this one - it tracks the newest good build. |
+| `ArenaNeighbor-1.8.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.7.zip` | previous; grab still used the base game's animation |
 | `ArenaNeighbor-1.5.zip` | previous; scream was intermittent and the laugh never landed with it |
 | `ArenaNeighbor-1.6-catanim.zip` | the animation experiment on its own; 1.7 includes it |
 | `ArenaNeighbor-1.4.zip` | runs; scream works, but no laugh and no idle whistle |
@@ -68,18 +69,32 @@ so while he was idle that `Play()` fired roughly ten times a second. Calling
 first few milliseconds and nothing was audible. Widening the range to 1-in-200
 gives about one whistle every ten seconds instead. Four bytes.
 
-### Why the catch animation cannot be fixed by settings alone
+### The grab is three fields, not one
 
-`CATAnimBlueprint` does not reference `cat_grabbed_2` anywhere, and it has no
-Slot node, so the catch cannot be reaching the screen through the Cat's own
-AnimBP. Meanwhile Foxy's class **replaces** the base game's catch with its own
-sequence at raw 7744: scream, `DisableMovement`, a 0.3s delay, a 3s delay, and
-originally a full-screen widget. Foxy's jumpscare was a 2D image, not an
-animation, which is why no catch animation plays no matter what
-`Animations.Catch` is set to.
+This was my mistake and it took far too long to find. The neighbour's grab is
+not a single animation slot. Stock Foxy points **three** fields at
+`Foxy_Jumpscare_Anim`:
 
-Getting the original Cat catch back means stopping that sequence from
-hijacking it, which is a structural change rather than a constant tweak.
+| field | what it is |
+|---|---|
+| `Catch` | the catch |
+| `Choke` | the grab itself |
+| `BedLookTake` | dragged out from under the bed |
+
+The build only set `Catch` and renamed the other two to `HNX_Removed`, which
+makes UE4 skip the tag and inherit the parent's value - the base game's
+animation. So the grab kept playing the stock Neighbour's animation no matter
+what `Catch` was set to. All three now point at `cat_grabbed_2`.
+
+That also settles the sound: `cat_grabbed_2` carries both
+`AnimNotify_PlaySound` entries, the scream and the laugh, so playing it starts
+them together exactly as the original mod does.
+
+### No delay on the catch
+
+After `DisableMovement` the sequence waited 0.3s and then 3s. Those existed to
+hold Foxy's full-screen jumpscare image, which is gone, so they had become a
+dead freeze where nothing happened. Both are now 0.
 
 ### What the original Cat mod actually does
 
@@ -125,12 +140,8 @@ the Cat jumps a lot.
 
 ## Known, not fixed
 
-- the catch animation does not play, so the laugh baked into `cat_grabbed_2`
-  as its second notify is never heard. `LookAround` does play, so animations
-  in general are fine - it is the catch specifically. `-catanim` is the test
-  for whether the Cat's own AnimBP is what the catch needs
-- `DieSound` is not the catch sound. Pointing it at the laugh in 1.5 changed
-  nothing, so getting caught does not go through it
+- the neighbour's jump grunt is the base game's, as it is in the original
+  Cat mod too
 - the neighbour's jump grunt is the base game's. The original Cat mod has
   this too - it does not override the jump animations either
 - F still shouts "HEY" and shows a hint. Removing it froze the game in 1.1
