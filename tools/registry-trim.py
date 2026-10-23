@@ -38,11 +38,19 @@ Usage:
   registry-trim.py <AssetRegistry.bin> --list
 """
 
+import importlib.util
 import os
 import struct
 import sys
 
 GUID = bytes.fromhex('e79e7f713a49b0e93291b3880781381b')
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location(
+    'ue_hash', os.path.join(_HERE, 'uasset_edit.py'))
+_ue = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_ue)
+_strihash, _strcrc32 = _ue.strihash, _ue.strcrc32
 
 
 def die(msg):
@@ -84,15 +92,16 @@ class Registry:
         self.count = struct.unpack_from('<i', d, self.o)[0]
         self.o += 4
         self.assets = []
+        self.tags = []
         for i in range(self.count):
             start = self.o
             path = self._fname()
             for _ in range(4):                      # PackagePath..AssetName
                 self._fname()
             ntags = self._i32()
+            tags = []
             for _ in range(ntags):
-                self._fname()
-                self._fstring()
+                tags.append((self._fname(), self._fstring()))
             # Deliberately two statements. "self.o += 4 * self._i32()" loads
             # self.o before _i32() advances it, so the count's own four bytes
             # get dropped and every later record is misread.
@@ -102,6 +111,7 @@ class Registry:
             if self.o > self.name_offset:
                 die('asset %d ran past the name table' % i)
             self.assets.append((path, start, self.o))
+            self.tags.append(tags)
         self.tail = d[self.o:self.name_offset]
 
     def _i32(self):
@@ -120,9 +130,53 @@ class Registry:
         ln = struct.unpack_from('<i', self.data, self.o)[0]
         self.o += 4
         if ln < 0:
+            s = self.data[self.o:self.o - 2 * ln - 2].decode('utf-16-le')
             self.o += -2 * ln
         else:
+            s = self.data[self.o:self.o + ln - 1].decode('latin1') if ln else ''
             self.o += ln
+        return s
+
+    def name_id(self, text):
+        """Index of a name, appending it to the table if new."""
+        if text not in self.names:
+            self.names.append(text)
+        return self.names.index(text)
+
+    def clone_record(self, like, newpath, newpkg, newname, retag=()):
+        """Copy an existing record, repointing its five FNames and any tag
+        whose value mentions the old package. Used to advertise an asset that
+        was added to the pak, so the Modding menu can see it."""
+        src = [i for i, (p, _, _) in enumerate(self.assets) if p == like]
+        if len(src) != 1:
+            die('template %r matched %d records' % (like, len(src)))
+        i = src[0]
+        _, start, end = self.assets[i]
+        head = self.data[start:start + 40]            # five FNames
+        rest = self.data[start + 40:end]
+        old_names = struct.unpack_from('<10i', head)
+        rec = bytearray()
+        rec += struct.pack('<ii', self.name_id(newpath), old_names[1])
+        rec += struct.pack('<ii', old_names[2], old_names[3])   # PackagePath
+        rec += struct.pack('<ii', old_names[4], old_names[5])   # AssetClass
+        rec += struct.pack('<ii', self.name_id(newpkg), old_names[7])
+        rec += struct.pack('<ii', self.name_id(newname), old_names[9])
+        # rebuild the tag block so values can change length
+        tags = [(k, dict(retag).get(k, v)) for k, v in self.tags[i]]
+        body = bytearray(struct.pack('<i', len(tags)))
+        for k, v in tags:
+            body += struct.pack('<ii', self.name_id(k), 0)
+            body += struct.pack('<i', len(v) + 1) + v.encode('latin1') + b'\0'
+        # chunk ids + PackageFlags copied verbatim from the tail of the source
+        o = start + 40
+        o += 4
+        for _ in range(self.tags[i].__len__()):
+            o += 8
+            ln = struct.unpack_from('<i', self.data, o)[0]
+            o += 4 + (ln if ln >= 0 else -2 * ln)
+        body += self.data[o:end]
+        self.extra = getattr(self, 'extra', b'') + bytes(rec) + bytes(body)
+        return len(self.names)
 
     def build(self, drop_spans=()):
         """Reassemble the file without the given (start, end) records."""
@@ -133,11 +187,19 @@ class Registry:
         out += d[:16]
         out += struct.pack('<i', self.version)
         out += struct.pack('<q', 0)                 # patched below
-        out += struct.pack('<i', len(keep))
+        extra = getattr(self, 'extra', b'')
+        out += struct.pack('<i', len(keep) + (1 if extra else 0))
         out += body
+        out += extra
         out += self.tail
         struct.pack_into('<q', out, 20, len(out))   # name table moves up
-        out += d[self.name_offset:]
+        tbl = bytearray(struct.pack('<i', len(self.names)))
+        for text in self.names:
+            raw = text.encode('latin1')
+            tbl += struct.pack('<i', len(raw) + 1) + raw + b'\0'
+            tbl += struct.pack('<HH', _strihash(text) & 0xFFFF,
+                               _strcrc32(text) & 0xFFFF)
+        out += tbl
         return bytes(out)
 
 
