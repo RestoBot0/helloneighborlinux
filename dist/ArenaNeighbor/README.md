@@ -4,8 +4,9 @@
 
 | file | state |
 |---|---|
-| **`ArenaNeighbor.zip`** | **1.3.** Use this one. 1.2 plus the Nightmare entry removed from the mod's asset list. |
-| `ArenaNeighbor-1.3.zip` | identical to the above, kept so the version is explicit |
+| **`ArenaNeighbor.zip`** | **1.4.** Always use this one - it tracks the newest good build. |
+| `ArenaNeighbor-1.4.zip` | identical to the above, kept so the version is explicit |
+| `ArenaNeighbor-1.3.zip` | runs, Nightmare gone, but the catch is silent |
 | `ArenaNeighbor-1.2.zip` | confirmed running on hardware; still shows the Nightmare entry |
 | `ArenaNeighbor-1.0.zip` | the previous build. Also runs, but the Modding menu calls him `AI_Foxy_Original` |
 
@@ -25,6 +26,21 @@ Unzip, put the `ArenaNeighbor` folder into `HelloNeighbor/Mods/` next to
 **Keep `Cat_In_The_Hat` installed** - this mod uses its model, animations and
 voice, referenced by name. `FoxyReignited` is not needed and can be deleted.
 
+## Sound, and where each one comes from (1.4)
+
+| | |
+|---|---|
+| chase music | `attack_sound` -> `panic_Cue` |
+| idle whistle | `Audio` -> `Cat_Whistling_Bored_Talking_Cue` |
+| spots you | `Audio2` -> `pieceofcake_Cue`, was still `Foxy_Spot_Cue` |
+| catches you | `ScreamRandom` -> `ignited-bonnie-jumpscare-remake`, was still `Foxy_ScreamRandom_Cue`; and `DieSound`, which the mod had set to `Clear_Cue` i.e. silence |
+
+`ScreamRandom.Play()` sits at raw 7769, gated on `AttackSound?` and followed
+immediately by `DisableMovement` - that is the catch. `cat_grabbed_2` also
+carries two `AnimNotify_PlaySound` entries of its own, so if the animation
+plays the sound comes with it; wiring the component too means it fires either
+way.
+
 ## What works (confirmed on hardware)
 
 - the Modding menu names him `AI_ArenaNeighbor` (1.2)
@@ -32,18 +48,17 @@ voice, referenced by name. `FoxyReignited` is not needed and can be deleted.
 - chase speed 5500, walking and investigating 600
 - doors broken through while chasing
 - the Cat's chase music, every chase
+- the Nightmare entry gone from the menu (1.3)
 - cameras, buckets, glue, vacuum cleaner. No tomatoes
 
 ## Known, not fixed
 
-- a fullscreen problem when starting a game with the mod. Present in 1.2;
-  not yet traced
-- the Nightmare entry: addressed in 1.3 by removing its record from
-  `AssetRegistry.bin` rather than deleting the asset. The file stays, so the
-  ten other packages that import that class still resolve. If the menu is not
-  built from the registry this changes nothing and breaks nothing
-- F still shouts "HEY" and shows a hint
-- no catch animation or sound
+- the catch *animation* may still be the base game's rather than the Cat's.
+  `Animations.Catch` is set to `cat_grabbed_2`, but it has not been confirmed
+  playing. 1.4 wires the scream to the audio component as well, so the sound
+  no longer depends on the animation
+- F still shouts "HEY" and shows a hint. Removing it froze the game in 1.1
+  and has not been retried
 
 ## Credits
 
